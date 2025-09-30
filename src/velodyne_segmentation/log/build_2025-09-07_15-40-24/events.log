@@ -1,0 +1,140 @@
+[0.000000] (-) TimerEvent: {}
+[0.000216] (velodyne_segmentation) JobQueued: {'identifier': 'velodyne_segmentation', 'dependencies': OrderedDict()}
+[0.000258] (velodyne_segmentation) JobStarted: {'identifier': 'velodyne_segmentation'}
+[0.004622] (velodyne_segmentation) JobProgress: {'identifier': 'velodyne_segmentation', 'progress': 'cmake'}
+[0.005139] (velodyne_segmentation) JobProgress: {'identifier': 'velodyne_segmentation', 'progress': 'build'}
+[0.005722] (velodyne_segmentation) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation', '--', '-j16', '-l16'], 'cwd': '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation', 'env': OrderedDict([('GJS_DEBUG_TOPICS', 'JS ERROR;JS LOG'), ('LESSOPEN', '| /usr/bin/lesspipe %s'), ('USER', 'acdl'), ('LC_TIME', 'ko_KR.UTF-8'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/home/acdl'), ('OLDPWD', '/home/acdl/Workspace/ws_lidar'), ('DESKTOP_SESSION', 'ubuntu'), ('GIO_LAUNCHED_DESKTOP_FILE', '/usr/share/applications/terminator.desktop'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'ko_KR.UTF-8'), ('MANAGERPID', '1693'), ('SYSTEMD_EXEC_PID', '1949'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('TERMINATOR_DBUS_NAME', 'net.tenshu.Terminator23558193cd9818af7fe4d2c2f5bd9d00f'), ('GIO_LAUNCHED_DESKTOP_FILE_PID', '654254'), ('COLCON_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'acdl'), ('JOURNAL_STREAM', '8:7723'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'acdl'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/acdl:@/tmp/.ICE-unix/1919,unix/acdl:/tmp/.ICE-unix/1919'), ('INVOCATION_ID', '2c7925d81b554f4d9b2824c43ab12494'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'ko_KR.UTF-8'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':1'), ('TERMINATOR_DBUS_PATH', '/net/tenshu/Terminator2'), ('LANG', 'en_US.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('IBUS_DISABLE_SNOOPER', '1'), ('LC_TELEPHONE', 'ko_KR.UTF-8'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('AMENT_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation:/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'ko_KR.UTF-8'), ('TERMINATOR_UUID', 'urn:uuid:e985ea77-0145-4885-a862-c3dbc76c3bce'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('LC_MEASUREMENT', 'ko_KR.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('GJS_DEBUG_OUTPUT', 'stderr'), ('LC_IDENTIFICATION', 'ko_KR.UTF-8'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation'), ('LC_ALL', 'en_US.UTF-8'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('LC_NUMERIC', 'ko_KR.UTF-8'), ('LC_PAPER', 'ko_KR.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('CMAKE_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation:/opt/ros/humble')]), 'shell': False}
+[0.045482] (velodyne_segmentation) StdoutLine: {'line': b'[ 50%] \x1b[32mBuilding CXX object CMakeFiles/lidar_segmentation_node.dir/src/lidar_segmentation_node.cpp.o\x1b[0m\n'}
+[0.099661] (-) TimerEvent: {}
+[0.199863] (-) TimerEvent: {}
+[0.300065] (-) TimerEvent: {}
+[0.400281] (-) TimerEvent: {}
+[0.500531] (-) TimerEvent: {}
+[0.600771] (-) TimerEvent: {}
+[0.701015] (-) TimerEvent: {}
+[0.801268] (-) TimerEvent: {}
+[0.901518] (-) TimerEvent: {}
+[1.001760] (-) TimerEvent: {}
+[1.102002] (-) TimerEvent: {}
+[1.202235] (-) TimerEvent: {}
+[1.302477] (-) TimerEvent: {}
+[1.402686] (-) TimerEvent: {}
+[1.502886] (-) TimerEvent: {}
+[1.603123] (-) TimerEvent: {}
+[1.703371] (-) TimerEvent: {}
+[1.803585] (-) TimerEvent: {}
+[1.903821] (-) TimerEvent: {}
+[2.004029] (-) TimerEvent: {}
+[2.104264] (-) TimerEvent: {}
+[2.204504] (-) TimerEvent: {}
+[2.304717] (-) TimerEvent: {}
+[2.404924] (-) TimerEvent: {}
+[2.505171] (-) TimerEvent: {}
+[2.605420] (-) TimerEvent: {}
+[2.705658] (-) TimerEvent: {}
+[2.805893] (-) TimerEvent: {}
+[2.906131] (-) TimerEvent: {}
+[3.006375] (-) TimerEvent: {}
+[3.106614] (-) TimerEvent: {}
+[3.206853] (-) TimerEvent: {}
+[3.307089] (-) TimerEvent: {}
+[3.407322] (-) TimerEvent: {}
+[3.507570] (-) TimerEvent: {}
+[3.607819] (-) TimerEvent: {}
+[3.708059] (-) TimerEvent: {}
+[3.808299] (-) TimerEvent: {}
+[3.908540] (-) TimerEvent: {}
+[4.008779] (-) TimerEvent: {}
+[4.109013] (-) TimerEvent: {}
+[4.209248] (-) TimerEvent: {}
+[4.309500] (-) TimerEvent: {}
+[4.409739] (-) TimerEvent: {}
+[4.509980] (-) TimerEvent: {}
+[4.610217] (-) TimerEvent: {}
+[4.710472] (-) TimerEvent: {}
+[4.810703] (-) TimerEvent: {}
+[4.910940] (-) TimerEvent: {}
+[5.011180] (-) TimerEvent: {}
+[5.111420] (-) TimerEvent: {}
+[5.211624] (-) TimerEvent: {}
+[5.311828] (-) TimerEvent: {}
+[5.412064] (-) TimerEvent: {}
+[5.512302] (-) TimerEvent: {}
+[5.612522] (-) TimerEvent: {}
+[5.712729] (-) TimerEvent: {}
+[5.812928] (-) TimerEvent: {}
+[5.913167] (-) TimerEvent: {}
+[6.013408] (-) TimerEvent: {}
+[6.113618] (-) TimerEvent: {}
+[6.213822] (-) TimerEvent: {}
+[6.314069] (-) TimerEvent: {}
+[6.414308] (-) TimerEvent: {}
+[6.514518] (-) TimerEvent: {}
+[6.614721] (-) TimerEvent: {}
+[6.714922] (-) TimerEvent: {}
+[6.815153] (-) TimerEvent: {}
+[6.915394] (-) TimerEvent: {}
+[7.015602] (-) TimerEvent: {}
+[7.115804] (-) TimerEvent: {}
+[7.216037] (-) TimerEvent: {}
+[7.316271] (-) TimerEvent: {}
+[7.416482] (-) TimerEvent: {}
+[7.516682] (-) TimerEvent: {}
+[7.616887] (-) TimerEvent: {}
+[7.717125] (-) TimerEvent: {}
+[7.817356] (-) TimerEvent: {}
+[7.917563] (-) TimerEvent: {}
+[8.017764] (-) TimerEvent: {}
+[8.118001] (-) TimerEvent: {}
+[8.218236] (-) TimerEvent: {}
+[8.318494] (-) TimerEvent: {}
+[8.418733] (-) TimerEvent: {}
+[8.518937] (-) TimerEvent: {}
+[8.619173] (-) TimerEvent: {}
+[8.719415] (-) TimerEvent: {}
+[8.819615] (-) TimerEvent: {}
+[8.919816] (-) TimerEvent: {}
+[9.020050] (-) TimerEvent: {}
+[9.120292] (-) TimerEvent: {}
+[9.220463] (-) TimerEvent: {}
+[9.320672] (-) TimerEvent: {}
+[9.420886] (-) TimerEvent: {}
+[9.521113] (-) TimerEvent: {}
+[9.621319] (-) TimerEvent: {}
+[9.721532] (-) TimerEvent: {}
+[9.729262] (velodyne_segmentation) StdoutLine: {'line': b'[100%] \x1b[32m\x1b[1mLinking CXX executable lidar_segmentation_node\x1b[0m\n'}
+[9.821650] (-) TimerEvent: {}
+[9.921858] (-) TimerEvent: {}
+[10.022068] (-) TimerEvent: {}
+[10.122312] (-) TimerEvent: {}
+[10.222545] (-) TimerEvent: {}
+[10.322780] (-) TimerEvent: {}
+[10.423017] (-) TimerEvent: {}
+[10.523263] (-) TimerEvent: {}
+[10.573574] (velodyne_segmentation) StdoutLine: {'line': b'[100%] Built target lidar_segmentation_node\n'}
+[10.580244] (velodyne_segmentation) CommandEnded: {'returncode': 0}
+[10.580729] (velodyne_segmentation) JobProgress: {'identifier': 'velodyne_segmentation', 'progress': 'install'}
+[10.585815] (velodyne_segmentation) Command: {'cmd': ['/usr/bin/cmake', '--install', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation'], 'cwd': '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation', 'env': OrderedDict([('GJS_DEBUG_TOPICS', 'JS ERROR;JS LOG'), ('LESSOPEN', '| /usr/bin/lesspipe %s'), ('USER', 'acdl'), ('LC_TIME', 'ko_KR.UTF-8'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/home/acdl'), ('OLDPWD', '/home/acdl/Workspace/ws_lidar'), ('DESKTOP_SESSION', 'ubuntu'), ('GIO_LAUNCHED_DESKTOP_FILE', '/usr/share/applications/terminator.desktop'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'ko_KR.UTF-8'), ('MANAGERPID', '1693'), ('SYSTEMD_EXEC_PID', '1949'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('TERMINATOR_DBUS_NAME', 'net.tenshu.Terminator23558193cd9818af7fe4d2c2f5bd9d00f'), ('GIO_LAUNCHED_DESKTOP_FILE_PID', '654254'), ('COLCON_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'acdl'), ('JOURNAL_STREAM', '8:7723'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'acdl'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/acdl:@/tmp/.ICE-unix/1919,unix/acdl:/tmp/.ICE-unix/1919'), ('INVOCATION_ID', '2c7925d81b554f4d9b2824c43ab12494'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'ko_KR.UTF-8'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':1'), ('TERMINATOR_DBUS_PATH', '/net/tenshu/Terminator2'), ('LANG', 'en_US.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('IBUS_DISABLE_SNOOPER', '1'), ('LC_TELEPHONE', 'ko_KR.UTF-8'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('AMENT_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation:/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'ko_KR.UTF-8'), ('TERMINATOR_UUID', 'urn:uuid:e985ea77-0145-4885-a862-c3dbc76c3bce'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('LC_MEASUREMENT', 'ko_KR.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('GJS_DEBUG_OUTPUT', 'stderr'), ('LC_IDENTIFICATION', 'ko_KR.UTF-8'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation'), ('LC_ALL', 'en_US.UTF-8'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('LC_NUMERIC', 'ko_KR.UTF-8'), ('LC_PAPER', 'ko_KR.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('CMAKE_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation:/opt/ros/humble')]), 'shell': False}
+[10.590243] (velodyne_segmentation) StdoutLine: {'line': b'-- Install configuration: ""\n'}
+[10.590363] (velodyne_segmentation) StdoutLine: {'line': b'-- Installing: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/lib/velodyne_segmentation/lidar_segmentation_node\n'}
+[10.592960] (velodyne_segmentation) StdoutLine: {'line': b'-- Set runtime path of "/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/lib/velodyne_segmentation/lidar_segmentation_node" to ""\n'}
+[10.593069] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/launch\n'}
+[10.593220] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/launch/seg.launch.py\n'}
+[10.593299] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/ament_index/resource_index/package_run_dependencies/velodyne_segmentation\n'}
+[10.593349] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/ament_index/resource_index/parent_prefix_path/velodyne_segmentation\n'}
+[10.593403] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/environment/ament_prefix_path.sh\n'}
+[10.593453] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/environment/ament_prefix_path.dsv\n'}
+[10.593498] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/environment/path.sh\n'}
+[10.593548] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/environment/path.dsv\n'}
+[10.593592] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/local_setup.bash\n'}
+[10.593636] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/local_setup.sh\n'}
+[10.593681] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/local_setup.zsh\n'}
+[10.593726] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/local_setup.dsv\n'}
+[10.593770] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/package.dsv\n'}
+[10.593815] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/ament_index/resource_index/packages/velodyne_segmentation\n'}
+[10.593859] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/cmake/velodyne_segmentationConfig.cmake\n'}
+[10.593903] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/cmake/velodyne_segmentationConfig-version.cmake\n'}
+[10.593948] (velodyne_segmentation) StdoutLine: {'line': b'-- Up-to-date: /home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation/share/velodyne_segmentation/package.xml\n'}
+[10.594350] (velodyne_segmentation) CommandEnded: {'returncode': 0}
+[10.605359] (velodyne_segmentation) JobEnded: {'identifier': 'velodyne_segmentation', 'rc': 0}
+[10.605819] (-) EventReactorShutdown: {}

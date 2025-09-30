@@ -1,0 +1,108 @@
+[0.000000] (-) TimerEvent: {}
+[0.000163] (velodyne_segmentation) JobQueued: {'identifier': 'velodyne_segmentation', 'dependencies': OrderedDict()}
+[0.000221] (velodyne_segmentation) JobStarted: {'identifier': 'velodyne_segmentation'}
+[0.004636] (velodyne_segmentation) JobProgress: {'identifier': 'velodyne_segmentation', 'progress': 'cmake'}
+[0.005157] (velodyne_segmentation) JobProgress: {'identifier': 'velodyne_segmentation', 'progress': 'build'}
+[0.005682] (velodyne_segmentation) Command: {'cmd': ['/usr/bin/cmake', '--build', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation', '--', '-j16', '-l16'], 'cwd': '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation', 'env': OrderedDict([('GJS_DEBUG_TOPICS', 'JS ERROR;JS LOG'), ('LESSOPEN', '| /usr/bin/lesspipe %s'), ('USER', 'acdl'), ('LC_TIME', 'ko_KR.UTF-8'), ('XDG_SESSION_TYPE', 'x11'), ('SHLVL', '1'), ('LD_LIBRARY_PATH', '/opt/ros/humble/opt/rviz_ogre_vendor/lib:/opt/ros/humble/lib/x86_64-linux-gnu:/opt/ros/humble/lib'), ('HOME', '/home/acdl'), ('OLDPWD', '/home/acdl/Workspace/ws_lidar'), ('DESKTOP_SESSION', 'ubuntu'), ('GIO_LAUNCHED_DESKTOP_FILE', '/usr/share/applications/terminator.desktop'), ('ROS_PYTHON_VERSION', '3'), ('GNOME_SHELL_SESSION_MODE', 'ubuntu'), ('GTK_MODULES', 'gail:atk-bridge'), ('LC_MONETARY', 'ko_KR.UTF-8'), ('MANAGERPID', '1693'), ('SYSTEMD_EXEC_PID', '1949'), ('DBUS_SESSION_BUS_ADDRESS', 'unix:path=/run/user/1000/bus'), ('COLORTERM', 'truecolor'), ('TERMINATOR_DBUS_NAME', 'net.tenshu.Terminator23558193cd9818af7fe4d2c2f5bd9d00f'), ('GIO_LAUNCHED_DESKTOP_FILE_PID', '684934'), ('COLCON_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install'), ('ROS_DISTRO', 'humble'), ('GTK_IM_MODULE', 'ibus'), ('LOGNAME', 'acdl'), ('JOURNAL_STREAM', '8:7723'), ('_', '/usr/bin/colcon'), ('ROS_VERSION', '2'), ('XDG_SESSION_CLASS', 'user'), ('USERNAME', 'acdl'), ('TERM', 'xterm-256color'), ('GNOME_DESKTOP_SESSION_ID', 'this-is-deprecated'), ('ROS_LOCALHOST_ONLY', '0'), ('WINDOWPATH', '2'), ('PATH', '/opt/ros/humble/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/snap/bin'), ('SESSION_MANAGER', 'local/acdl:@/tmp/.ICE-unix/1919,unix/acdl:/tmp/.ICE-unix/1919'), ('INVOCATION_ID', '2c7925d81b554f4d9b2824c43ab12494'), ('XDG_MENU_PREFIX', 'gnome-'), ('LC_ADDRESS', 'ko_KR.UTF-8'), ('XDG_RUNTIME_DIR', '/run/user/1000'), ('DISPLAY', ':1'), ('TERMINATOR_DBUS_PATH', '/net/tenshu/Terminator2'), ('LANG', 'en_US.UTF-8'), ('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME'), ('IBUS_DISABLE_SNOOPER', '1'), ('LC_TELEPHONE', 'ko_KR.UTF-8'), ('XMODIFIERS', '@im=ibus'), ('XDG_SESSION_DESKTOP', 'ubuntu'), ('XAUTHORITY', '/run/user/1000/gdm/Xauthority'), ('LS_COLORS', 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'), ('SSH_AGENT_LAUNCHER', 'gnome-keyring'), ('SSH_AUTH_SOCK', '/run/user/1000/keyring/ssh'), ('AMENT_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation:/opt/ros/humble'), ('SHELL', '/bin/bash'), ('LC_NAME', 'ko_KR.UTF-8'), ('TERMINATOR_UUID', 'urn:uuid:ae7f9fd8-fe95-4d55-a294-659d29bc49f0'), ('QT_ACCESSIBILITY', '1'), ('GDMSESSION', 'ubuntu'), ('LESSCLOSE', '/usr/bin/lesspipe %s %s'), ('LC_MEASUREMENT', 'ko_KR.UTF-8'), ('GPG_AGENT_INFO', '/run/user/1000/gnupg/S.gpg-agent:0:1'), ('GJS_DEBUG_OUTPUT', 'stderr'), ('LC_IDENTIFICATION', 'ko_KR.UTF-8'), ('QT_IM_MODULE', 'ibus'), ('PWD', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/build/velodyne_segmentation'), ('LC_ALL', 'en_US.UTF-8'), ('XDG_CONFIG_DIRS', '/etc/xdg/xdg-ubuntu:/etc/xdg'), ('XDG_DATA_DIRS', '/usr/share/ubuntu:/usr/share/gnome:/usr/local/share/:/usr/share/:/var/lib/snapd/desktop'), ('PYTHONPATH', '/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/lib/python3.10/dist-packages'), ('LC_NUMERIC', 'ko_KR.UTF-8'), ('LC_PAPER', 'ko_KR.UTF-8'), ('COLCON', '1'), ('VTE_VERSION', '6800'), ('CMAKE_PREFIX_PATH', '/home/acdl/Workspace/ws_lidar/velodyne_segmentation/install/velodyne_segmentation:/opt/ros/humble')]), 'shell': False}
+[0.034704] (velodyne_segmentation) StdoutLine: {'line': b'\x1b[35m\x1b[1mConsolidate compiler generated dependencies of target lidar_segmentation_node\x1b[0m\n'}
+[0.051367] (velodyne_segmentation) StdoutLine: {'line': b'[ 50%] \x1b[32mBuilding CXX object CMakeFiles/lidar_segmentation_node.dir/src/lidar_segmentation_node.cpp.o\x1b[0m\n'}
+[0.099588] (-) TimerEvent: {}
+[0.199791] (-) TimerEvent: {}
+[0.300001] (-) TimerEvent: {}
+[0.400207] (-) TimerEvent: {}
+[0.500439] (-) TimerEvent: {}
+[0.600656] (-) TimerEvent: {}
+[0.700862] (-) TimerEvent: {}
+[0.801076] (-) TimerEvent: {}
+[0.901313] (-) TimerEvent: {}
+[1.001535] (-) TimerEvent: {}
+[1.101740] (-) TimerEvent: {}
+[1.201943] (-) TimerEvent: {}
+[1.302171] (-) TimerEvent: {}
+[1.402401] (-) TimerEvent: {}
+[1.502611] (-) TimerEvent: {}
+[1.602813] (-) TimerEvent: {}
+[1.703016] (-) TimerEvent: {}
+[1.803246] (-) TimerEvent: {}
+[1.903487] (-) TimerEvent: {}
+[2.003690] (-) TimerEvent: {}
+[2.103895] (-) TimerEvent: {}
+[2.204103] (-) TimerEvent: {}
+[2.304337] (-) TimerEvent: {}
+[2.404565] (-) TimerEvent: {}
+[2.504772] (-) TimerEvent: {}
+[2.604979] (-) TimerEvent: {}
+[2.705212] (-) TimerEvent: {}
+[2.805448] (-) TimerEvent: {}
+[2.905658] (-) TimerEvent: {}
+[3.005861] (-) TimerEvent: {}
+[3.106068] (-) TimerEvent: {}
+[3.206312] (-) TimerEvent: {}
+[3.306544] (-) TimerEvent: {}
+[3.406752] (-) TimerEvent: {}
+[3.506960] (-) TimerEvent: {}
+[3.607163] (-) TimerEvent: {}
+[3.707371] (-) TimerEvent: {}
+[3.802851] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:\x1b[m\x1b[K In member function \xe2\x80\x98\x1b[01m\x1b[Kvoid LidarSegNode::cbCloud(sensor_msgs::msg::PointCloud2_<std::allocator<void> >::SharedPtr)\x1b[m\x1b[K\xe2\x80\x99:\n'}
+[3.802999] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:140:54:\x1b[m\x1b[K \x1b[01;31m\x1b[Kerror: \x1b[m\x1b[K\xe2\x80\x98\x1b[01m\x1b[Ksearch\x1b[m\x1b[K\xe2\x80\x99 in namespace \xe2\x80\x98\x1b[01m\x1b[Kpcl\x1b[m\x1b[K\xe2\x80\x99 does not name a template type\n'}
+[3.803052] (velodyne_segmentation) StderrLine: {'line': b'  140 |       pcl::search::KdTree<PointT>::Ptr tree(new pcl::\x1b[01;31m\x1b[Ksearch\x1b[m\x1b[K<KdTree<PointT>>());\n'}
+[3.803096] (velodyne_segmentation) StderrLine: {'line': b'      |                                                      \x1b[01;31m\x1b[K^~~~~~\x1b[m\x1b[K\n'}
+[3.803140] (velodyne_segmentation) StderrLine: {'line': b'In file included from \x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/sample_consensus/sac_model.h:57\x1b[m\x1b[K,\n'}
+[3.803187] (velodyne_segmentation) StderrLine: {'line': b'                 from \x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/sample_consensus/sac.h:43\x1b[m\x1b[K,\n'}
+[3.803230] (velodyne_segmentation) StderrLine: {'line': b'                 from \x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/segmentation/sac_segmentation.h:48\x1b[m\x1b[K,\n'}
+[3.803271] (velodyne_segmentation) StderrLine: {'line': b'                 from \x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:9\x1b[m\x1b[K:\n'}
+[3.803313] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/search/search.h:49:13:\x1b[m\x1b[K \x1b[01;36m\x1b[Knote: \x1b[m\x1b[K\xe2\x80\x98\x1b[01m\x1b[Kpcl::search\x1b[m\x1b[K\xe2\x80\x99 declared here\n'}
+[3.803355] (velodyne_segmentation) StderrLine: {'line': b'   49 |   namespace \x1b[01;36m\x1b[Ksearch\x1b[m\x1b[K\n'}
+[3.803395] (velodyne_segmentation) StderrLine: {'line': b'      |             \x1b[01;36m\x1b[K^~~~~~\x1b[m\x1b[K\n'}
+[3.803848] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:140:61:\x1b[m\x1b[K \x1b[01;31m\x1b[Kerror: \x1b[m\x1b[K\xe2\x80\x98\x1b[01m\x1b[KKdTree\x1b[m\x1b[K\xe2\x80\x99 was not declared in this scope\n'}
+[3.803958] (velodyne_segmentation) StderrLine: {'line': b'  140 |       pcl::search::KdTree<PointT>::Ptr tree(new pcl::search<\x1b[01;31m\x1b[KKdTree\x1b[m\x1b[K<PointT>>());\n'}
+[3.804006] (velodyne_segmentation) StderrLine: {'line': b'      |                                                             \x1b[01;31m\x1b[K^~~~~~\x1b[m\x1b[K\n'}
+[3.804050] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:140:61:\x1b[m\x1b[K \x1b[01;36m\x1b[Knote: \x1b[m\x1b[Ksuggested alternatives:\n'}
+[3.804095] (velodyne_segmentation) StderrLine: {'line': b'In file included from \x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/kdtree/kdtree_flann.h:43\x1b[m\x1b[K,\n'}
+[3.804137] (velodyne_segmentation) StderrLine: {'line': b'                 from \x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/search/kdtree.h:43\x1b[m\x1b[K,\n'}
+[3.804182] (velodyne_segmentation) StderrLine: {'line': b'                 from \x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:11\x1b[m\x1b[K:\n'}
+[3.804225] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/kdtree/kdtree.h:54:9:\x1b[m\x1b[K \x1b[01;36m\x1b[Knote: \x1b[m\x1b[K  \xe2\x80\x98\x1b[01m\x1b[Kpcl::KdTree\x1b[m\x1b[K\xe2\x80\x99\n'}
+[3.804266] (velodyne_segmentation) StderrLine: {'line': b'   54 |   class \x1b[01;36m\x1b[KKdTree\x1b[m\x1b[K\n'}
+[3.804307] (velodyne_segmentation) StderrLine: {'line': b'      |         \x1b[01;36m\x1b[K^~~~~~\x1b[m\x1b[K\n'}
+[3.804347] (velodyne_segmentation) StderrLine: {'line': b'In file included from \x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:11\x1b[m\x1b[K:\n'}
+[3.804388] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/usr/include/pcl-1.12/pcl/search/kdtree.h:61:11:\x1b[m\x1b[K \x1b[01;36m\x1b[Knote: \x1b[m\x1b[K  \xe2\x80\x98\x1b[01m\x1b[Kpcl::search::KdTree\x1b[m\x1b[K\xe2\x80\x99\n'}
+[3.804429] (velodyne_segmentation) StderrLine: {'line': b'   61 |     class \x1b[01;36m\x1b[KKdTree\x1b[m\x1b[K: public Search<PointT>\n'}
+[3.804473] (velodyne_segmentation) StderrLine: {'line': b'      |           \x1b[01;36m\x1b[K^~~~~~\x1b[m\x1b[K\n'}
+[3.804519] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:140:74:\x1b[m\x1b[K \x1b[01;31m\x1b[Kerror: \x1b[m\x1b[Kexpected primary-expression before \xe2\x80\x98\x1b[01m\x1b[K>>\x1b[m\x1b[K\xe2\x80\x99 token\n'}
+[3.804562] (velodyne_segmentation) StderrLine: {'line': b'  140 |       pcl::search::KdTree<PointT>::Ptr tree(new pcl::search<KdTree<PointT\x1b[01;31m\x1b[K>>\x1b[m\x1b[K());\n'}
+[3.804602] (velodyne_segmentation) StderrLine: {'line': b'      |                                                                          \x1b[01;31m\x1b[K^~\x1b[m\x1b[K\n'}
+[3.804650] (velodyne_segmentation) StderrLine: {'line': b'\x1b[01m\x1b[K/home/acdl/Workspace/ws_lidar/velodyne_segmentation/src/lidar_segmentation_node.cpp:140:77:\x1b[m\x1b[K \x1b[01;31m\x1b[Kerror: \x1b[m\x1b[Kexpected primary-expression before \xe2\x80\x98\x1b[01m\x1b[K)\x1b[m\x1b[K\xe2\x80\x99 token\n'}
+[3.804690] (velodyne_segmentation) StderrLine: {'line': b'  140 |       pcl::search::KdTree<PointT>::Ptr tree(new pcl::search<KdTree<PointT>>(\x1b[01;31m\x1b[K)\x1b[m\x1b[K);\n'}
+[3.804736] (velodyne_segmentation) StderrLine: {'line': b'      |                                                                             \x1b[01;31m\x1b[K^\x1b[m\x1b[K\n'}
+[3.807460] (-) TimerEvent: {}
+[3.907636] (-) TimerEvent: {}
+[4.007849] (-) TimerEvent: {}
+[4.108056] (-) TimerEvent: {}
+[4.208289] (-) TimerEvent: {}
+[4.308527] (-) TimerEvent: {}
+[4.408729] (-) TimerEvent: {}
+[4.508936] (-) TimerEvent: {}
+[4.609178] (-) TimerEvent: {}
+[4.709440] (-) TimerEvent: {}
+[4.809653] (-) TimerEvent: {}
+[4.909860] (-) TimerEvent: {}
+[5.010107] (-) TimerEvent: {}
+[5.110344] (-) TimerEvent: {}
+[5.210567] (-) TimerEvent: {}
+[5.310784] (-) TimerEvent: {}
+[5.410990] (-) TimerEvent: {}
+[5.511221] (-) TimerEvent: {}
+[5.611458] (-) TimerEvent: {}
+[5.711676] (-) TimerEvent: {}
+[5.811884] (-) TimerEvent: {}
+[5.912123] (-) TimerEvent: {}
+[6.012360] (-) TimerEvent: {}
+[6.112560] (-) TimerEvent: {}
+[6.212767] (-) TimerEvent: {}
+[6.303176] (velodyne_segmentation) StderrLine: {'line': b'gmake[2]: *** [CMakeFiles/lidar_segmentation_node.dir/build.make:76: CMakeFiles/lidar_segmentation_node.dir/src/lidar_segmentation_node.cpp.o] Error 1\n'}
+[6.303340] (velodyne_segmentation) StderrLine: {'line': b'gmake[1]: *** [CMakeFiles/Makefile2:137: CMakeFiles/lidar_segmentation_node.dir/all] Error 2\n'}
+[6.303466] (velodyne_segmentation) StderrLine: {'line': b'gmake: *** [Makefile:146: all] Error 2\n'}
+[6.305082] (velodyne_segmentation) CommandEnded: {'returncode': 2}
+[6.312815] (velodyne_segmentation) JobEnded: {'identifier': 'velodyne_segmentation', 'rc': 2}
+[6.313105] (-) TimerEvent: {}
+[6.323197] (-) EventReactorShutdown: {}
