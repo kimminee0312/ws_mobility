@@ -257,7 +257,7 @@ private:
         float d = (centroids[selected[i]] - centroids[selected[i+1]]).norm();
         if (d > max_dist) {
             max_dist = d;
-            if (max_dist >=2.0) {
+            if (max_dist >=2.8) {
                 idx1 = selected[i];
                 idx2 = selected[i+1];
             }
@@ -295,6 +295,18 @@ private:
         cyl2.pose.position.z = centroids[idx2][2];
         // cyl2.lifetime = rclcpp::Duration(0, 200000);
         markers.markers.push_back(cyl2);
+
+        // ✅ 좌표 및 거리 출력
+        float dx = centroids[idx2][0] - centroids[idx1][0];
+        float dy = centroids[idx2][1] - centroids[idx1][1];
+        float dz = centroids[idx2][2] - centroids[idx1][2];
+        float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+        RCLCPP_INFO(this->get_logger(),
+                    "Red Cylinders:\n P1=(%.2f, %.2f, %.2f)\n P2=(%.2f, %.2f, %.2f)\n Distance=%.2f m",
+                    centroids[idx1][0], centroids[idx1][1], centroids[idx1][2],
+                    centroids[idx2][0], centroids[idx2][1], centroids[idx2][2],
+                    dist);
 
         geometry_msgs::msg::PoseArray pose_array;
         pose_array.header = msg->header;
