@@ -12,6 +12,7 @@
 #include <cmath>
 #include <Eigen/Dense>
 #include <geometry_msgs/msg/pose_array.hpp>
+#include <deque>  // 최근 좌표 기록용
 
 using PointT = pcl::PointXYZ;
 
@@ -34,9 +35,10 @@ public:
   }
 
 private:
-  // 이전 프레임에서 저장한 원기둥 좌표
-  Eigen::Vector3f prev_cyl1_{NAN, NAN, NAN};
-  Eigen::Vector3f prev_cyl2_{NAN, NAN, NAN};
+  // 최근 3프레임 좌표 기록
+  std::deque<Eigen::Vector3f> cyl1_history_;
+  std::deque<Eigen::Vector3f> cyl2_history_;
+  int history_size_ = 3;
 
   void callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     // 기존 마커 지우기
@@ -77,18 +79,15 @@ private:
       for (int idx : indices.indices)
         cluster->push_back((*cloud)[idx]);
 
-      // Bounding box
       Eigen::Vector4f min_pt, max_pt;
       pcl::getMinMax3D(*cluster, min_pt, max_pt);
       float height = max_pt.z() - min_pt.z();
       float width  = max_pt.x() - min_pt.x();
       float depth  = max_pt.y() - min_pt.y();
 
-      // 라바콘 조건 필터
       if (height < 0.2 || height > 0.9) continue;
       if (width > 0.4 || depth > 0.4) continue;
 
-      // 랜덤 색상
       uint8_t r = dist(rng), g = dist(rng), b = dist(rng);
       for (const auto& p : cluster->points) {
         pcl::PointXYZRGB pt;
@@ -97,12 +96,10 @@ private:
         colored_cloud->points.push_back(pt);
       }
 
-      // 중심점
       Eigen::Vector4f centroid;
       pcl::compute3DCentroid(*cluster, centroid);
       centroids.push_back(centroid.head<3>());
 
-      // Marker (파란색 원기둥)
       visualization_msgs::msg::Marker m;
       m.header = msg->header;
       m.ns = "cones";
@@ -216,7 +213,7 @@ private:
       current = next_idx;
     }
 
-    // 가장 먼 두 점 → 원기둥 마커
+    // 가장 먼 두 점 → 빨간 원기둥
     if (selected.size() >= 2) {
       float max_dist = -1.0;
       int idx1 = -1, idx2 = -1;
@@ -235,32 +232,37 @@ private:
       if (idx1 != -1 && idx2 != -1) {
         Eigen::Vector3f new_cyl1 = centroids[idx1];
         Eigen::Vector3f new_cyl2 = centroids[idx2];
+        float threshold = 0.17;
 
-        float threshold = 0.17; // m 단위 threshold
-
-        // 첫 좌표 비교
-        if (!std::isnan(prev_cyl1_.x())) {
-          float d1 = (new_cyl1 - prev_cyl1_).norm();
+        // Cyl1 안정화 (최근 3프레임 평균)
+        if (!cyl1_history_.empty()) {
+          Eigen::Vector3f avg = Eigen::Vector3f::Zero();
+          for (auto &c : cyl1_history_) avg += c;
+          avg /= cyl1_history_.size();
+          float d1 = (new_cyl1 - avg).norm();
           if (d1 > threshold) {
             RCLCPP_WARN(this->get_logger(), "Cyl1 jump detected, ignoring");
-            new_cyl1 = prev_cyl1_;
+            new_cyl1 = cyl1_history_.back();
           }
         }
+        cyl1_history_.push_back(new_cyl1);
+        if (cyl1_history_.size() > history_size_) cyl1_history_.pop_front();
 
-        // 두 번째 좌표 비교
-        if (!std::isnan(prev_cyl2_.x())) {
-          float d2 = (new_cyl2 - prev_cyl2_).norm();
+        // Cyl2 안정화
+        if (!cyl2_history_.empty()) {
+          Eigen::Vector3f avg = Eigen::Vector3f::Zero();
+          for (auto &c : cyl2_history_) avg += c;
+          avg /= cyl2_history_.size();
+          float d2 = (new_cyl2 - avg).norm();
           if (d2 > threshold) {
             RCLCPP_WARN(this->get_logger(), "Cyl2 jump detected, ignoring");
-            new_cyl2 = prev_cyl2_;
+            new_cyl2 = cyl2_history_.back();
           }
         }
+        cyl2_history_.push_back(new_cyl2);
+        if (cyl2_history_.size() > history_size_) cyl2_history_.pop_front();
 
-        // 업데이트
-        prev_cyl1_ = new_cyl1;
-        prev_cyl2_ = new_cyl2;
-
-        // 원기둥 마커
+        // 빨간 원기둥 마커
         visualization_msgs::msg::Marker cyl1, cyl2;
         cyl1.header = msg->header;
         cyl1.ns = "farthest_points";
