@@ -275,103 +275,158 @@ private:
     local_cones.push_back(local);
     }
 
-    // --- 2️⃣ 그룹화 수행 ---
-    std::vector<std::vector<Eigen::Vector3f>> groups;
-    std::vector<bool> used(local_cones.size(), false);
+    // --- 2️⃣ 그룹화 수행 (x축, y축 별도) ---
+    std::vector<std::vector<Eigen::Vector3f>> groups_x;
+    std::vector<std::vector<Eigen::Vector3f>> groups_y;
+    std::vector<bool> used_x(local_cones.size(), false);
+    std::vector<bool> used_y(local_cones.size(), false);
 
-    for (size_t i = 0; i < local_cones.size(); ++i) {
-    if (used[i]) continue;
+    // 🔹 X좌표 기준 그룹화
+    for (const auto& pt : local_cones) {
+        bool assigned = false;
+        for (auto& group : groups_x) {
+            // 그룹 평균 x 계산
+            float avg_x = 0.0f;
+            for (auto& gpt : group) avg_x += gpt.x();
+            avg_x /= group.size();
 
-    std::vector<Eigen::Vector3f> group;
-    group.push_back(local_cones[i]);
-    used[i] = true;
-
-    bool added = true;
-    while (added) {
-        added = false;
-        for (size_t j = 0; j < local_cones.size(); ++j) {
-        if (used[j]) continue;
-        for (const auto& g : group) {
-            if (fabs(local_cones[j].x() - g.x()) < 0.1f || fabs(local_cones[j].y() - g.y()) < 0.1f) {
-            group.push_back(local_cones[j]);
-            used[j] = true;
-            added = true;
-            break;
+            if (fabs(pt.x() - avg_x) < 0.25f) {   // ← 🔧 완화된 조건
+                group.push_back(pt);
+                assigned = true;
+                break;
             }
         }
+        if (!assigned) {
+            groups_x.push_back({pt});
         }
     }
-    groups.push_back(group);
+
+    // 🔹 Y좌표 기준 그룹화
+    for (const auto& pt : local_cones) {
+        bool assigned = false;
+        for (auto& group : groups_y) {
+            // 그룹 평균 y 계산
+            float avg_y = 0.0f;
+            for (auto& gpt : group) avg_y += gpt.y();
+            avg_y /= group.size();
+
+            if (fabs(pt.y() - avg_y) < 0.15f) {   // ← 🔧 완화된 조건
+                group.push_back(pt);
+                assigned = true;
+                break;
+            }
+        }
+        if (!assigned) {
+            groups_y.push_back({pt});
+        }
     }
+
 
     // --- 3️⃣ 시각화 ---
     visualization_msgs::msg::MarkerArray group_markers;
     int id = 0;
-    std::vector<std::array<float,3>> colors = {
-    {1.0,0.0,0.0}, {0.0,1.0,0.0}, {0.0,0.0,1.0},
-    {1.0,1.0,0.0}, {1.0,0.0,1.0}, {0.0,1.0,1.0}
+    std::vector<std::array<float,3>> colors_x = {
+    {1.0,0.0,0.0}, {1.0,0.5,0.0}, {1.0,0.0,0.5}, {0.8,0.3,0.3}
+    };
+    std::vector<std::array<float,3>> colors_y = {
+    {0.0,0.0,1.0}, {0.0,1.0,1.0}, {0.3,0.3,0.8}, {0.0,0.5,1.0}
     };
 
-    for (size_t g = 0; g < groups.size(); ++g) {
-        auto color = colors[g % colors.size()];
-        for (const auto& p_local : groups[g]) {
-            Eigen::Vector3f global = origin_ + R_ * p_local;
-            visualization_msgs::msg::Marker m;
-            m.header = msg->header;
-            m.ns = "cone_groups";
-            m.id = id++;
-            m.type = visualization_msgs::msg::Marker::CYLINDER;
-            m.action = visualization_msgs::msg::Marker::ADD;
-            m.pose.position.x = global.x();
-            m.pose.position.y = global.y();
-            m.pose.position.z = global.z();
-            m.scale.x = 0.5;   // ✅ 지름 커짐 (기존 0.25 → 0.5)
-            m.scale.y = 0.5;
-            m.scale.z = 0.8;   // ✅ 높이 살짝 키움
-            m.color.r = color[0];
-            m.color.g = color[1];
-            m.color.b = color[2];
-            m.color.a = 0.4;
-            group_markers.markers.push_back(m);
-        }
+    // 🔹 X기준 그룹 (세로줄)
+    for (size_t g = 0; g < groups_x.size(); ++g) {
+    auto color = colors_x[g % colors_x.size()];
+    for (size_t i = 0; i < groups_x[g].size(); ++i) {
+        Eigen::Vector3f global = origin_ + R_ * groups_x[g][i];
+        visualization_msgs::msg::Marker m;
+        m.header = msg->header;
+        m.ns = "group_x_" + std::to_string(g);  // ✅ 그룹마다 namespace 구분
+        m.id = static_cast<int>(i);             // ✅ 그룹 내 개별 id
+        m.type = visualization_msgs::msg::Marker::CYLINDER;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.pose.position.x = global.x();
+        m.pose.position.y = global.y();
+        m.pose.position.z = global.z();
+        m.scale.x = m.scale.y = 0.35;
+        m.scale.z = 0.7;
+        m.color.r = color[0];
+        m.color.g = color[1];
+        m.color.b = color[2];
+        m.color.a = 0.3;
+        group_markers.markers.push_back(m);
     }
-    // 🔹 대신 세 배열을 합쳐서 한 번만 퍼블리시
+    }
+
+    // 🔹 Y기준 그룹 (가로줄)
+    for (size_t g = 0; g < groups_y.size(); ++g) {
+    auto color = colors_y[g % colors_y.size()];
+    for (size_t i = 0; i < groups_y[g].size(); ++i) {
+        Eigen::Vector3f global = origin_ + R_ * groups_y[g][i];
+        visualization_msgs::msg::Marker m;
+        m.header = msg->header;
+        m.ns = "group_y_" + std::to_string(g);  // ✅ 그룹마다 namespace 구분
+        m.id = static_cast<int>(i);             // ✅ 그룹 내 개별 id
+        m.type = visualization_msgs::msg::Marker::CYLINDER;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.pose.position.x = global.x();
+        m.pose.position.y = global.y();
+        m.pose.position.z = global.z();
+        m.scale.x = m.scale.y = 0.35;
+        m.scale.z = 0.7;
+        m.color.r = color[0];
+        m.color.g = color[1];
+        m.color.b = color[2];
+        m.color.a = 0.3;
+        group_markers.markers.push_back(m);
+    }
+    }
+
+    // --- 마지막 부분 ---
     visualization_msgs::msg::MarkerArray merged;
+
+    // 1️⃣ 파란색 라바콘
     merged.markers.insert(merged.markers.end(),
                         cone_markers.markers.begin(), cone_markers.markers.end());
+    // 2️⃣ 두 기준점과 화살표
     merged.markers.insert(merged.markers.end(),
                         arr.markers.begin(), arr.markers.end());
+    // 3️⃣ 그룹 시각화
     merged.markers.insert(merged.markers.end(),
                         group_markers.markers.begin(), group_markers.markers.end());
+
+    // 🔹 한 번만 퍼블리시
     pub_marker_->publish(merged);
+
+    // 🔹 그룹 마커만 별도 토픽으로도 발행
     pub_marker_groups_->publish(group_markers);
   }
 
   void publishMarkersOnly(const std_msgs::msg::Header& header,
-                          const Eigen::Vector3f& p1,
-                          std::optional<Eigen::Vector3f> p2_opt) {
+                            const Eigen::Vector3f& p1,
+                            std::optional<Eigen::Vector3f> p2_opt) {
     visualization_msgs::msg::MarkerArray arr;
-
     auto sphere = [&](int id, const Eigen::Vector3f& p,
-                      float r, float g, float b, const std::string& ns){
-      visualization_msgs::msg::Marker m;
-      m.header = header;
-      m.ns = ns;
-      m.id = id;
-      m.type = visualization_msgs::msg::Marker::SPHERE;
-      m.action = visualization_msgs::msg::Marker::ADD;
-      m.pose.position.x = p.x();
-      m.pose.position.y = p.y();
-      m.pose.position.z = p.z();
-      m.scale.x = m.scale.y = m.scale.z = 0.4;
-      m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 1.0;
-      return m;
+                        float r, float g, float b, const std::string& ns){
+        visualization_msgs::msg::Marker m;
+        m.header = header;
+        m.ns = ns;
+        m.id = id;
+        m.type = visualization_msgs::msg::Marker::SPHERE;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.pose.position.x = p.x();
+        m.pose.position.y = p.y();
+        m.pose.position.z = p.z();
+        m.scale.x = m.scale.y = m.scale.z = 0.4;
+        m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 1.0;
+        return m;
     };
 
     arr.markers.push_back(sphere(0, p1, 1.0, 0.0, 0.0, "closest_cone_1"));
     if (p2_opt.has_value()) {
-      arr.markers.push_back(sphere(1, *p2_opt, 0.0, 1.0, 0.0, "closest_cone_2"));
+        arr.markers.push_back(sphere(1, *p2_opt, 0.0, 1.0, 0.0, "closest_cone_2"));
     }
+
+    // ✅ 실제 퍼블리시 추가
+    pub_marker_->publish(arr);
   }
 
 private:
