@@ -275,52 +275,82 @@ private:
     local_cones.push_back(local);
     }
 
-    // --- 2️⃣ 그룹화 수행 (x축, y축 별도) ---
+    // --- 그룹화 (X좌표 기준) ---
     std::vector<std::vector<Eigen::Vector3f>> groups_x;
+    {
+        // x좌표 기준 정렬
+        std::vector<Eigen::Vector3f> sorted = local_cones;
+        std::sort(sorted.begin(), sorted.end(),
+                [](auto& a, auto& b){ return a.x() < b.x(); });
+
+        std::vector<Eigen::Vector3f> current_group;
+        for (size_t i = 0; i < sorted.size(); ++i) {
+            if (current_group.empty()) {
+                current_group.push_back(sorted[i]);
+            } else {
+                float diff = fabs(sorted[i].x() - current_group.back().x());
+                if (diff < 0.25f) {   // 🔧 같은 세로줄
+                    current_group.push_back(sorted[i]);
+                } else {
+                    groups_x.push_back(current_group);
+                    current_group.clear();
+                    current_group.push_back(sorted[i]);
+                }
+            }
+        }
+        if (!current_group.empty()) groups_x.push_back(current_group);
+    }
+
+    // --- 그룹화 (Y좌표 기준) ---
     std::vector<std::vector<Eigen::Vector3f>> groups_y;
-    std::vector<bool> used_x(local_cones.size(), false);
-    std::vector<bool> used_y(local_cones.size(), false);
+    {
+        // y좌표 기준 정렬
+        std::vector<Eigen::Vector3f> sorted = local_cones;
+        std::sort(sorted.begin(), sorted.end(),
+                [](auto& a, auto& b){ return a.y() < b.y(); });
 
-    // 🔹 X좌표 기준 그룹화
-    for (const auto& pt : local_cones) {
-        bool assigned = false;
-        for (auto& group : groups_x) {
-            // 그룹 평균 x 계산
-            float avg_x = 0.0f;
-            for (auto& gpt : group) avg_x += gpt.x();
-            avg_x /= group.size();
-
-            if (fabs(pt.x() - avg_x) < 0.25f) {   // ← 🔧 완화된 조건
-                group.push_back(pt);
-                assigned = true;
-                break;
+        std::vector<Eigen::Vector3f> current_group;
+        for (size_t i = 0; i < sorted.size(); ++i) {
+            if (current_group.empty()) {
+                current_group.push_back(sorted[i]);
+            } else {
+                float diff = fabs(sorted[i].y() - current_group.back().y());
+                if (diff < 0.15f) {   // 🔧 같은 가로줄
+                    current_group.push_back(sorted[i]);
+                } else {
+                    groups_y.push_back(current_group);
+                    current_group.clear();
+                    current_group.push_back(sorted[i]);
+                }
             }
         }
-        if (!assigned) {
-            groups_x.push_back({pt});
-        }
+        if (!current_group.empty()) groups_y.push_back(current_group);
+    }   
+
+    // --- 그룹화 결과 출력 ---
+    RCLCPP_INFO(this->get_logger(), "📌 그룹화 결과 (cone_local 좌표계 기준)");
+
+    RCLCPP_INFO(this->get_logger(), "X축 기준 그룹 수: %zu", groups_x.size());
+    for (size_t g = 0; g < groups_x.size(); ++g) {
+    std::ostringstream oss;
+    oss << "  Group X" << g << ": ";
+    for (const auto& p : groups_x[g]) {
+        oss << "(" << std::fixed << std::setprecision(2)
+            << p.x() << "," << p.y() << "," << p.z() << ") ";
+    }
+    RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
     }
 
-    // 🔹 Y좌표 기준 그룹화
-    for (const auto& pt : local_cones) {
-        bool assigned = false;
-        for (auto& group : groups_y) {
-            // 그룹 평균 y 계산
-            float avg_y = 0.0f;
-            for (auto& gpt : group) avg_y += gpt.y();
-            avg_y /= group.size();
-
-            if (fabs(pt.y() - avg_y) < 0.15f) {   // ← 🔧 완화된 조건
-                group.push_back(pt);
-                assigned = true;
-                break;
-            }
-        }
-        if (!assigned) {
-            groups_y.push_back({pt});
-        }
+    RCLCPP_INFO(this->get_logger(), "Y축 기준 그룹 수: %zu", groups_y.size());
+    for (size_t g = 0; g < groups_y.size(); ++g) {
+    std::ostringstream oss;
+    oss << "  Group Y" << g << ": ";
+    for (const auto& p : groups_y[g]) {
+        oss << "(" << std::fixed << std::setprecision(2)
+            << p.x() << "," << p.y() << "," << p.z() << ") ";
     }
-
+    RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
+    }
 
     // --- 3️⃣ 시각화 ---
     visualization_msgs::msg::MarkerArray group_markers;
