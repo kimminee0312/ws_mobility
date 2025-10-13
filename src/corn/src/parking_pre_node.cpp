@@ -17,6 +17,9 @@
 #include <sstream>
 #include <algorithm>
 #include <nav_msgs/msg/occupancy_grid.hpp>
+#include <pcl/filters/passthrough.h>
+#include <limits>
+
 
 // TF2
 #include <tf2_ros/transform_broadcaster.h>
@@ -64,17 +67,28 @@ private:
     pcl::fromROSMsg(*msg, *cloud);
     if (cloud->empty()) return;
 
-    // 클러스터링
+    // ✅ z > -0.16 m 필터링 (지면 근처 제거)
+    pcl::PointCloud<PointT>::Ptr cloud_z(new pcl::PointCloud<PointT>);
+    {
+      pcl::PassThrough<PointT> pass;
+      pass.setInputCloud(cloud);
+      pass.setFilterFieldName("z");
+      pass.setFilterLimits(-0.16f, std::numeric_limits<float>::max());  // (-0.16, +inf)
+      pass.filter(*cloud_z);
+    }
+    if (cloud_z->empty()) return;
+
+    // 클러스터링은 필터된 점군으로 수행
     pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
-    tree->setInputCloud(cloud);
+    tree->setInputCloud(cloud_z);
 
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<PointT> ec;
-    ec.setClusterTolerance(0.5);   // 필요 시 조정
+    ec.setClusterTolerance(0.5);
     ec.setMinClusterSize(3);
     ec.setMaxClusterSize(100);
     ec.setSearchMethod(tree);
-    ec.setInputCloud(cloud);
+    ec.setInputCloud(cloud_z);
     ec.extract(cluster_indices);
 
     std::vector<Eigen::Vector3f> centroids;
@@ -83,7 +97,7 @@ private:
     for (const auto& indices : cluster_indices) {
       pcl::PointCloud<PointT>::Ptr cluster(new pcl::PointCloud<PointT>);
       cluster->points.reserve(indices.indices.size());
-      for (int idx : indices.indices) cluster->push_back((*cloud)[idx]);
+      for (int idx : indices.indices) cluster->push_back((*cloud_z)[idx]);
 
       // 라바콘 형태 필터 (AABB)
       Eigen::Vector4f min_pt, max_pt;
@@ -91,7 +105,7 @@ private:
       float height = max_pt.z() - min_pt.z();
       float width  = max_pt.x() - min_pt.x();
       float depth  = max_pt.y() - min_pt.y();
-      if (height < 0.15f || height > 1.0f) continue;
+      if (height < 0.1f || height > 1.0f) continue;
       if (width  > 0.4f || depth  > 0.4f) continue;
 
       // 중심점
@@ -471,7 +485,7 @@ private:
 
       grid.data.assign(W * H, 0);            // 0=free, 100=occupied, -1=unknown
 
-      const float Z_MIN = -0.2f, Z_MAX = 1.5f; // 높이 필터(선택)
+      const float Z_MIN = 0.2f, Z_MAX = 1.5f; // 높이 필터(선택)
       for (const auto& lp : local_cones) {
         if (lp.z() < Z_MIN || lp.z() > Z_MAX) continue;
 
