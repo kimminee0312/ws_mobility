@@ -36,7 +36,7 @@ public:
       "/closest_cone_markers", 10);
 
     pub_marker_groups_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-      "/cone_group_markers", 10);
+      "/cone_group_markers", 1);
 
     pub_grid_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
       "/cone_grid", 10);
@@ -70,6 +70,7 @@ private:
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
     pcl::fromROSMsg(*msg, *cloud);
     if (cloud->empty()) return;
+
 
     // ✅ z > -0.21 m 필터링 (지면 근처 제거)
     pcl::PointCloud<PointT>::Ptr cloud_z(new pcl::PointCloud<PointT>);
@@ -272,8 +273,11 @@ private:
       {
         visualization_msgs::msg::Marker m;
         m.header = msg->header; m.ns = "p12"; m.id = 0;
-        m.type = visualization_msgs::msg::Marker::SPHERE; m.action = visualization_msgs::msg::Marker::ADD;
-        m.pose.position.x = p1.x(); m.pose.position.y = p1.y(); m.pose.position.z = p1.z();
+        m.type = visualization_msgs::msg::Marker::SPHERE;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.pose.position.x = p1.x(); 
+        m.pose.position.y = p1.y(); 
+        m.pose.position.z = p1.z();
         m.scale.x = m.scale.y = m.scale.z = 0.4;
         m.color.r = 1.0; m.color.g = 0.0; m.color.b = 0.0; m.color.a = 1.0;
         p12_arr.markers.push_back(m);
@@ -380,15 +384,22 @@ private:
                 [](const auto& a, const auto& b){ return a.x() < b.x(); });
 
       std::vector<Eigen::Vector3f> current_group;
-      for (size_t i = 0; i < sorted.size(); ++i) {
-        if (current_group.empty()) {
+      for (size_t i = 0; i < sorted.size(); ++i) 
+      {
+        if (current_group.empty()) 
+        {
           current_group.push_back(sorted[i]);
-        } else {
+        } 
+        else 
+        {
           float diff_x  = std::fabs(sorted[i].x() - current_group.back().x());
           float dist_xy = (sorted[i] - current_group.back()).norm();
-          if (diff_x < 0.4f && dist_xy < 1.5f) {
+          if (diff_x < 0.4f && dist_xy < 1.5f) 
+          {
             current_group.push_back(sorted[i]);
-          } else {
+          } 
+          else 
+          {
             groups_x.push_back(current_group);
             current_group.clear();
             current_group.push_back(sorted[i]);
@@ -423,7 +434,8 @@ private:
       }
       if (!current_group.empty()) groups_y.push_back(current_group);
     }
-
+    
+    
     // --- 그룹화 결과 로그 ---
     RCLCPP_INFO(this->get_logger(), "📌 그룹화 결과 (cone_local 좌표계 기준)");
     RCLCPP_INFO(this->get_logger(), "X축 기준 그룹 수: %zu", groups_x.size());
@@ -447,100 +459,116 @@ private:
 
     // --- 그룹 선 시각화 (ns/id 재사용 + 줄어든 id DELETE) ---
     visualization_msgs::msg::MarkerArray group_markers;
+    
+    // 보조: LINE_LIST에 폴리라인을 (p[i-1], p[i]) 쌍으로 추가
+    auto append_polyline_as_line_list = [&](visualization_msgs::msg::Marker& m,
+                                            const std::vector<Eigen::Vector3f>& poly) {
+      if (poly.size() < 2) return;
+      for (size_t i = 1; i < poly.size(); ++i) {
+        Eigen::Vector3f g0 = origin_ + R_ * poly[i - 1];
+        Eigen::Vector3f g1 = origin_ + R_ * poly[i];
 
-    // X 라인
-    for (size_t g = 0; g < groups_x.size(); ++g) {
-      visualization_msgs::msg::Marker line;
-      line.header = msg->header;
-      line.ns = "group_x";                 // 고정 ns
-      line.id = static_cast<int>(g);       // 0..Nx-1
-      line.type = visualization_msgs::msg::Marker::LINE_STRIP;
-      line.action = visualization_msgs::msg::Marker::ADD;
-      line.scale.x = 0.05;
-      line.color.r = 1.0f; line.color.g = 0.5f; line.color.b = 0.0f; line.color.a = 0.95f;
+        geometry_msgs::msg::Point P0; P0.x = g0.x(); P0.y = g0.y(); P0.z = g0.z();
+        geometry_msgs::msg::Point P1; P1.x = g1.x(); P1.y = g1.y(); P1.z = g1.z();
 
-      for (const auto& p_local : groups_x[g]) {
-        Eigen::Vector3f global = origin_ + R_ * p_local;
-        geometry_msgs::msg::Point P; P.x = global.x(); P.y = global.y(); P.z = global.z();
-        line.points.push_back(P);
+        m.points.push_back(P0);
+        m.points.push_back(P1);
       }
-      if (line.points.size() >= 2) group_markers.markers.push_back(line);
-    }
-    for (int g = static_cast<int>(groups_x.size()); g < last_group_x_count_; ++g) {
-      visualization_msgs::msg::Marker del;
-      del.header = msg->header; del.ns="group_x"; del.id=g; del.action=visualization_msgs::msg::Marker::DELETE;
-      group_markers.markers.push_back(del);
-    }
-    last_group_x_count_ = static_cast<int>(groups_x.size());
+    };
 
-    // Y 라인
-    for (size_t g = 0; g < groups_y.size(); ++g) {
-      visualization_msgs::msg::Marker line;
-      line.header = msg->header;
-      line.ns = "group_y";
-      line.id = static_cast<int>(g);
-      line.type = visualization_msgs::msg::Marker::LINE_STRIP;
-      line.action = visualization_msgs::msg::Marker::ADD;
-      line.scale.x = 0.05;
-      line.color.r = 0.0f; line.color.g = 0.7f; line.color.b = 1.0f; line.color.a = 0.95f;
+    // ---------------------- X: 마커 1개 ----------------------
+    {
+      visualization_msgs::msg::Marker mx;
+      mx.header = msg->header;
+      mx.ns = "group_x";
+      mx.id = 0;  // X는 항상 id=0
+      mx.type = visualization_msgs::msg::Marker::LINE_LIST;
+      mx.scale.x = 0.05;
+      mx.color.r = 1.0f; mx.color.g = 0.5f; mx.color.b = 0.0f; mx.color.a = 0.95f;
 
-      for (const auto& p_local : groups_y[g]) {
-        Eigen::Vector3f global = origin_ + R_ * p_local;
-        geometry_msgs::msg::Point P; P.x = global.x(); P.y = global.y(); P.z = global.z();
-        line.points.push_back(P);
+      // 모든 X-그룹을 하나의 LINE_LIST에 누적
+      for (const auto& poly : groups_x) {
+        append_polyline_as_line_list(mx, poly);
       }
-      if (line.points.size() >= 2) group_markers.markers.push_back(line);
-    }
-    for (int g = static_cast<int>(groups_y.size()); g < last_group_y_count_; ++g) {
-      visualization_msgs::msg::Marker del;
-      del.header = msg->header; del.ns="group_y"; del.id=g; del.action=visualization_msgs::msg::Marker::DELETE;
-      group_markers.markers.push_back(del);
-    }
-    last_group_y_count_ = static_cast<int>(groups_y.size());
 
-    // --- OccupancyGrid 생성/퍼블리시 (탑다운 2D) ---
-    if (has_initialized_frame_) {
-      const float RES = 0.10f;
-      const int   W   = 200;
-      const int   H   = 200;
-      const float HALF_W = (W * RES) * 0.5f;
-      const float HALF_H = (H * RES) * 0.5f;
-
-      nav_msgs::msg::OccupancyGrid grid;
-      grid.header = msg->header;
-      grid.header.frame_id = "cone_local";
-      grid.info.resolution = RES;
-      grid.info.width  = W;
-      grid.info.height = H;
-
-      // cone_local 좌표계 기준 중앙정렬
-      grid.info.origin.position.x = -HALF_W;
-      grid.info.origin.position.y = -HALF_H;
-      grid.info.origin.position.z = 0.0;
-      grid.info.origin.orientation.w = 1.0;
-
-      grid.data.assign(W * H, 0);
-
-      const float Z_MIN = 0.2f, Z_MAX = 1.5f;
-      for (const auto& lp : local_cones) {
-        if (lp.z() < Z_MIN || lp.z() > Z_MAX) continue;
-        float gx = lp.x() + HALF_W;
-        float gy = lp.y() + HALF_H;
-        int ix = static_cast<int>(std::floor(gx / RES));
-        int iy = static_cast<int>(std::floor(gy / RES));
-        if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
-        int idx = iy * W + ix;
-        grid.data[idx] = 100;
-        for (int dy = -1; dy <= 1; ++dy) {
-          for (int dx = -1; dx <= 1; ++dx) {
-            int nx = ix + dx, ny = iy + dy;
-            if (nx >= 0 && ny >= 0 && nx < W && ny < H)
-              grid.data[ny * W + nx] = 100;
-          }
-        }
+      if (!mx.points.empty()) {
+        mx.action = visualization_msgs::msg::Marker::ADD;
+        group_markers.markers.push_back(mx);
+      } else {
+        // 이번 프레임에 표시할 X 선이 없으면 기존 것을 지움
+        mx.action = visualization_msgs::msg::Marker::DELETE;
+        group_markers.markers.push_back(mx);
       }
-      pub_grid_->publish(grid);
     }
+
+    // ---------------------- Y: 마커 1개 ----------------------
+    {
+      visualization_msgs::msg::Marker my;
+      my.header = msg->header;
+      my.ns = "group_y";
+      my.id = 0;  // Y도 항상 id=0
+      my.type = visualization_msgs::msg::Marker::LINE_LIST; // LINE_STRIP 대신 LINE_LIST로 병합
+      my.scale.x = 0.05;
+      my.color.r = 0.0f; my.color.g = 0.7f; my.color.b = 1.0f; my.color.a = 0.95f;
+
+      for (const auto& poly : groups_y) {
+        append_polyline_as_line_list(my, poly);
+      }
+
+      if (!my.points.empty()) {
+        my.action = visualization_msgs::msg::Marker::ADD;
+        group_markers.markers.push_back(my);
+      } else {
+        my.action = visualization_msgs::msg::Marker::DELETE;
+        group_markers.markers.push_back(my);
+      }
+    }
+
+    // // --- OccupancyGrid 생성/퍼블리시 (탑다운 2D) ---
+    // if (has_initialized_frame_) {
+    //   const float RES = 0.10f;
+    //   const int   W   = 200;
+    //   const int   H   = 200;
+    //   const float HALF_W = (W * RES) * 0.5f;
+    //   const float HALF_H = (H * RES) * 0.5f;
+
+    //   nav_msgs::msg::OccupancyGrid grid;
+    //   grid.header = msg->header;
+    //   grid.header.frame_id = "cone_local";
+    //   grid.info.resolution = RES;
+    //   grid.info.width  = W;
+    //   grid.info.height = H;
+
+    //   // cone_local 좌표계 기준 중앙정렬
+    //   grid.info.origin.position.x = -HALF_W;
+    //   grid.info.origin.position.y = -HALF_H;
+    //   grid.info.origin.position.z = 0.0;
+    //   grid.info.origin.orientation.w = 1.0;
+
+    //   grid.data.assign(W * H, 0);
+
+    //   const float Z_MIN = 0.2f, Z_MAX = 1.5f;
+    //   for (const auto& lp : local_cones) {
+    //     if (lp.z() < Z_MIN || lp.z() > Z_MAX) continue;
+    //     float gx = lp.x() + HALF_W;
+    //     float gy = lp.y() + HALF_H;
+    //     int ix = static_cast<int>(std::floor(gx / RES));
+    //     int iy = static_cast<int>(std::floor(gy / RES));
+    //     if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
+    //     int idx = iy * W + ix;
+    //     grid.data[idx] = 100;
+    //     for (int dy = -1; dy <= 1; ++dy) {
+    //       for (int dx = -1; dx <= 1; ++dx) {
+    //         int nx = ix + dx, ny = iy + dy;
+    //         if (nx >= 0 && ny >= 0 && nx < W && ny < H)
+    //           grid.data[ny * W + nx] = 100;
+    //       }
+    //     }
+    //   }
+    //   pub_grid_->publish(grid);
+    // }
+
+  
 
     // --- 마지막 병합/퍼블리시 (한 번만) ---
     visualization_msgs::msg::MarkerArray merged;
@@ -552,40 +580,9 @@ private:
                           group_markers.markers.begin(), group_markers.markers.end());
 
     pub_marker_->publish(merged);
-    pub_marker_groups_->publish(group_markers);
+    // pub_marker_groups_->publish(group_markers);
   } // cloudCallback
 
-  void publishMarkersOnly(const std_msgs::msg::Header& header,
-                          const Eigen::Vector3f& p1,
-                          std::optional<Eigen::Vector3f> p2_opt) {
-    visualization_msgs::msg::MarkerArray arr;
-    auto sphere = [&](int id, const Eigen::Vector3f& p,
-                      float r, float g, float b, const std::string& ns){
-      visualization_msgs::msg::Marker m;
-      m.header = header;
-      m.ns = ns;
-      m.id = id;
-      m.type = visualization_msgs::msg::Marker::SPHERE;
-      m.action = visualization_msgs::msg::Marker::ADD;
-      m.pose.position.x = p.x();
-      m.pose.position.y = p.y();
-      m.pose.position.z = p.z();
-      m.scale.x = m.scale.y = m.scale.z = 0.4;
-      m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 1.0;
-      return m;
-    };
-
-    arr.markers.push_back(sphere(0, p1, 1.0, 0.0, 0.0, "closest_cone_1"));
-    if (p2_opt.has_value()) {
-      arr.markers.push_back(sphere(1, *p2_opt, 0.0, 1.0, 0.0, "closest_cone_2"));
-    } else {
-      // id=1 삭제
-      visualization_msgs::msg::Marker del;
-      del.header = header; del.ns="closest_cone_2"; del.id=1; del.action=visualization_msgs::msg::Marker::DELETE;
-      arr.markers.push_back(del);
-    }
-    pub_marker_->publish(arr);
-  }
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_cloud_;
