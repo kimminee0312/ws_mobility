@@ -42,6 +42,12 @@ public:
     pub_grid_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
       "/cone_grid", 10);
 
+    pub_cluster_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/cone_clusters_colored", 10);
+
+    pub_deg_zcloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/points_deg_zfiltered_colored", 10); 
+
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     has_published_tf_ = false;
@@ -73,10 +79,30 @@ private:
       pcl::PassThrough<PointT> pass;
       pass.setInputCloud(cloud);
       pass.setFilterFieldName("z");
-      pass.setFilterLimits(-0.16f, std::numeric_limits<float>::max());  // (-0.16, +inf)
+      pass.setFilterLimits(-0.21f, std::numeric_limits<float>::max());  // (-0.16, +inf)
       pass.filter(*cloud_z);
     }
     if (cloud_z->empty()) return;
+
+    // deggggggggggggggggggggg
+    // === z > -0.16 m 필터링 (지면 근처 제거) 바로 아래에 추가 ===
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr zcolored(new pcl::PointCloud<pcl::PointXYZRGB>);
+    zcolored->points.reserve(cloud_z->points.size());
+    for (const auto& p : cloud_z->points) {
+      pcl::PointXYZRGB prgb;
+      prgb.x = p.x; prgb.y = p.y; prgb.z = p.z;
+      prgb.r = 255; prgb.g = 0; prgb.b = 255;  // 보라색
+      zcolored->points.push_back(prgb);
+    }
+    zcolored->width  = static_cast<uint32_t>(zcolored->points.size());
+    zcolored->height = 1;
+    zcolored->is_dense = false;
+
+    sensor_msgs::msg::PointCloud2 zmsg;
+    pcl::toROSMsg(*zcolored, zmsg);
+    zmsg.header = msg->header;                 // 입력과 동일한 stamp/frame
+    pub_deg_zcloud_->publish(zmsg);
+
 
     // 클러스터링은 필터된 점군으로 수행
     pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
@@ -85,13 +111,15 @@ private:
     std::vector<pcl::PointIndices> cluster_indices;
     pcl::EuclideanClusterExtraction<PointT> ec;
     ec.setClusterTolerance(0.5);
-    ec.setMinClusterSize(3);
-    ec.setMaxClusterSize(100);
+    ec.setMinClusterSize(1);
+    ec.setMaxClusterSize(20000000);
     ec.setSearchMethod(tree);
     ec.setInputCloud(cloud_z);
     ec.extract(cluster_indices);
 
     std::vector<Eigen::Vector3f> centroids;
+    pcl::PointCloud<PointT>::Ptr cloud_outer(new pcl::PointCloud<PointT>);
+
     centroids.reserve(cluster_indices.size());
 
     for (const auto& indices : cluster_indices) {
@@ -105,8 +133,11 @@ private:
       float height = max_pt.z() - min_pt.z();
       float width  = max_pt.x() - min_pt.x();
       float depth  = max_pt.y() - min_pt.y();
-      if (height < 0.1f || height > 1.0f) continue;
-      if (width  > 0.4f || depth  > 0.4f) continue;
+      if (height < 0.1f || height > 1.0f || width  > 0.4f || depth  > 0.4f)
+      {
+         *cloud_outer += *cluster;
+          continue; 
+      }
 
       // 중심점
       Eigen::Vector4f c;
@@ -114,7 +145,83 @@ private:
       centroids.push_back(c.head<3>());
     }
 
-    if (centroids.size() < 1) return;
+    // if (centroids.size() < 1) return;
+
+    // 라바콘 2차 검출 
+    if (!cloud_outer->empty()) {
+      // 2차에선 파라미터를 조금 다르게 (예: 공차↓, 최소점수↓ 등) — 상황에 맞게 조정
+      pcl::search::KdTree<PointT>::Ptr tree2(new pcl::search::KdTree<PointT>);
+      tree2->setInputCloud(cloud_outer);
+
+      std::vector<pcl::PointIndices> cluster_indices2;
+      pcl::EuclideanClusterExtraction<PointT> ec2;
+      ec2.setClusterTolerance(0.3);   // 더 촘촘하게
+      ec2.setMinClusterSize(2);        // 소수점 클러스터도 시도
+      ec2.setMaxClusterSize(1200);
+      ec2.setSearchMethod(tree2);
+      ec2.setInputCloud(cloud_outer);
+      ec2.extract(cluster_indices2);
+
+      // ★ 여기부터: 클러스터별 색상 포인트클라우드 누적
+      // 팔레트(원하면 더 추가/변경 가능)
+      static const std::array<std::array<uint8_t,3>, 12> PALETTE = {{
+        {255,  59,  48}, {255, 149,   0}, {255, 204,   0}, { 52, 199,  89},
+        {  0, 199, 190}, { 48, 176, 199}, { 88,  86, 214}, {255,  45,  85},
+        {142, 142, 147}, {162, 132,  94}, { 64, 156, 255}, {100, 210, 255}
+      }};
+
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+      colored_cloud->is_dense = false;
+
+      size_t cid = 0;
+      for (const auto& indices2 : cluster_indices2) {
+        // 클러스터 색상 선택
+        const auto& col = PALETTE[cid % PALETTE.size()];
+        ++cid;
+
+        pcl::PointCloud<PointT>::Ptr cluster2(new pcl::PointCloud<PointT>);
+        cluster2->points.reserve(indices2.indices.size());
+        for (int idx : indices2.indices) cluster2->push_back((*cloud_outer)[idx]);
+
+        // (선택) 2차 라바콘 조건 완화/변경
+        Eigen::Vector4f min_pt2, max_pt2;
+        pcl::getMinMax3D(*cluster2, min_pt2, max_pt2);
+        float h2 = max_pt2.z() - min_pt2.z();
+        float w2 = max_pt2.x() - min_pt2.x();
+        float d2 = max_pt2.y() - min_pt2.y();
+
+        // bool cone_like2 = true; // 필요하면 h2/w2/d2 조건 다시 적용
+        bool cone_like2 =
+          (h2 >= 0.1f && h2 <= 1.0f) &&   // 살짝 완화
+          (w2 <= 0.5f) &&
+          (d2 <= 0.5f);
+        if (!cone_like2) continue;
+
+        // 2차 중심점도 사용한다면 계속 유지
+        Eigen::Vector4f c2;
+        pcl::compute3DCentroid(*cluster2, c2);
+        centroids.push_back(c2.head<3>());
+
+        // 포인트들에 색 입혀 누적
+        colored_cloud->points.reserve(colored_cloud->points.size() + cluster2->points.size());
+        for (const auto& p : cluster2->points) {
+          pcl::PointXYZRGB prgb;
+          prgb.x = p.x; prgb.y = p.y; prgb.z = p.z;
+          prgb.r = col[0]; prgb.g = col[1]; prgb.b = col[2];
+          colored_cloud->points.push_back(prgb);
+        }
+      }
+
+      // 비어있지 않으면 ROS 메시지로 퍼블리시
+      if (!colored_cloud->points.empty()) {
+        sensor_msgs::msg::PointCloud2 msg_out;
+        pcl::toROSMsg(*colored_cloud, msg_out);
+        msg_out.header = msg->header;               // 원본과 동일한 frame/time
+        msg_out.header.frame_id = msg->header.frame_id; // 혹은 "cone_local"로 바꾸고 싶으면 변경
+        pub_cluster_cloud_->publish(msg_out);
+      }
+      // ★ 여기까지
+    }
 
     // ✅ 모든 클러스터(라바콘 후보)를 파란색 원기둥으로 시각화
     visualization_msgs::msg::MarkerArray cone_markers;
@@ -137,6 +244,8 @@ private:
       m.color.b = 1.0;   // 🔵 파란색
       m.color.a = 0.8;
       cone_markers.markers.push_back(m);
+      pub_marker_->publish(cone_markers);
+
     }
 
     // 차량 원점(0,0,0) 기준 1번(가장 가까운) 찾기
@@ -332,7 +441,7 @@ private:
           float diff_x  = std::fabs(sorted[i].x() - current_group.back().x());
           float dist_xy = (sorted[i] - current_group.back()).norm(); // 3D 거리
           // 같은 세로줄 + 인접거리 1.5m 이하
-          if (diff_x < 0.1f && dist_xy < 1.5f) {
+          if (diff_x < 0.4f && dist_xy < 1.5f) {
             current_group.push_back(sorted[i]);
           } else {
             groups_x.push_back(current_group);
@@ -360,7 +469,7 @@ private:
           float diff_y  = std::fabs(sorted[i].y() - current_group.back().y());
           float dist_xy = (sorted[i] - current_group.back()).norm(); // 3D 거리
           // 같은 가로줄 + 인접거리 1.5m 이하
-          if (diff_y < 0.1f && dist_xy < 1.5f) {
+          if (diff_y < 0.4f && dist_xy < 1.5f) {
             current_group.push_back(sorted[i]);
           } else {
             groups_y.push_back(current_group);
@@ -565,7 +674,10 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_groups_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr pub_grid_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cluster_cloud_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_deg_zcloud_;
+
 };
 
 int main(int argc, char** argv) {
