@@ -67,14 +67,14 @@ private:
 
   // --- grouping thresholds (tunable) ---
   // 1차 그룹핑(느슨하게)
-  const float X_EPS_JOIN   = 0.30f;  // X기준: Δx 허용
-  const float Y_EPS_JOIN   = 0.30f;  // Y기준: Δy 허용
+  const float X_EPS_JOIN   = 0.40f;  // X기준: Δx 허용
+  const float Y_EPS_JOIN   = 0.40f;  // Y기준: Δy 허용
   const float D_EPS_JOIN_X = 1.5f;  // X기준: 전체 거리 상한
   const float D_EPS_JOIN_Y = 1.5f;  // Y기준: 전체 거리 상한 
 
   // 2차 병합(보수)
-  const float MERGE_Y_BAND = 0.30f;  // Y모드: 평균 y 차 허용(같은 가로줄)
-  const float MERGE_X_BAND = 0.30f;  // X모드: 평균 x 차 허용(같은 세로줄)
+  const float MERGE_Y_BAND = 0.40f;  // Y모드: 평균 y 차 허용(같은 가로줄)
+  const float MERGE_X_BAND = 0.40f;  // X모드: 평균 x 차 허용(같은 세로줄)
   const float MERGE_GAP_Y  = 1.50f;  // Y모드 전체 거리 
   const float MERGE_GAP_X  = 1.5f;  // X모드 전체 거리 
 
@@ -82,13 +82,13 @@ private:
   bool can_join_X(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
     const float dx = std::fabs(p.x() - q.x());
     if (dx > X_EPS_JOIN) return false;               
-    if (D_EPS_JOIN_X > 0.0f && (p - q).norm() > D_EPS_JOIN_X) return false;
+    if (D_EPS_JOIN_X > 0.0f && (p.head<2>() - q.head<2>()).norm() > D_EPS_JOIN_X) return false;
     return true;
   }
   bool can_join_Y(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
     const float dy = std::fabs(p.y() - q.y());
     if (dy > Y_EPS_JOIN) return false;               
-    if (D_EPS_JOIN_Y > 0.0f && (p - q).norm() > D_EPS_JOIN_Y) return false;
+    if (D_EPS_JOIN_Y > 0.0f && (p.head<2>() - q.head<2>()).norm() > D_EPS_JOIN_Y) return false;
     return true;
   }
 
@@ -164,79 +164,89 @@ private:
 
   // --- 2차 병합: 같은 줄 후보끼리 인접한 그룹을 붙인다
   std::vector<std::vector<Eigen::Vector3f>>
-  second_pass_merge_Y(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
+  second_pass_merge_X(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
     if (groups.empty()) return {};
-    // 1) 요약 & 정렬: 같은 y줄끼리, 그리고 x가 작은 순으로
+    // 1) 요약
     std::vector<GroupSummary> gs; gs.reserve(groups.size());
     for (const auto& g : groups) gs.push_back(summarize_group(g));
+    // 2) 먼저 mean_x 기준 정렬(가독성; 필수는 아님)
     std::sort(gs.begin(), gs.end(), [](const GroupSummary& a, const GroupSummary& b){
-      if (std::fabs(a.mean_y - b.mean_y) > 1e-6f) return a.mean_y < b.mean_y;
-      return a.min_x < b.min_x;
+      if (std::fabs(a.mean_x - b.mean_x) > 1e-6f) return a.mean_x < b.mean_x;
+      return a.min_y < b.min_y;
     });
 
-    // 2) 병합
-    std::vector<GroupSummary> out;
-    out.push_back(gs[0]);
-    for (size_t i = 1; i < gs.size(); ++i) {
-      auto& curr = gs[i];
-      auto& back = out.back();
-      const bool same_row = (std::fabs(curr.mean_y - back.mean_y) <= MERGE_Y_BAND);
-      const float gap = closest_endpoint_gap_Y(back, curr);
-
-      if (same_row && gap <= MERGE_GAP_Y) {
-        // merge: back <- back + curr (정렬/정규화는 다음 시각화에서 폴리라인으로 연결)
-        back.pts.insert(back.pts.end(), curr.pts.begin(), curr.pts.end());
-        // 요약 갱신
-        back = summarize_group(back.pts);
-      } else {
-        out.push_back(curr);
+    // 3) 반복 병합: 어떤 쌍이라도 붙을 수 있으면 붙이고 다시 처음부터
+    bool merged_any = true;
+    while (merged_any) {
+      merged_any = false;
+      for (size_t i = 0; i < gs.size(); ++i) {
+        for (size_t j = i + 1; j < gs.size(); ++j) {
+          const bool same_col = (std::fabs(gs[i].mean_x - gs[j].mean_x) <= MERGE_X_BAND);
+          const float gap = closest_endpoint_gap_X(gs[i], gs[j]);
+          if (same_col && gap <= MERGE_GAP_X) {
+            // i <- i + j
+            gs[i].pts.insert(gs[i].pts.end(), gs[j].pts.begin(), gs[j].pts.end());
+            gs[i] = summarize_group(gs[i].pts);
+            gs.erase(gs.begin() + j);
+            merged_any = true;
+            break; // j 루프 탈출, i부터 다시
+          }
+        }
+        if (merged_any) break;
       }
     }
 
-    // pts만 반환
+    // 4) pts만 반환 (폴리라인용 y 오름차순 정렬)
     std::vector<std::vector<Eigen::Vector3f>> merged;
-    merged.reserve(out.size());
-    for (auto& g : out) {
-      // 폴리라인 시각화를 위해 x 오름차순 정렬
+    merged.reserve(gs.size());
+    for (auto& g : gs) {
       std::sort(g.pts.begin(), g.pts.end(),
-                [](const auto& A, const auto& B){ return A.x() < B.x(); });
+                [](const auto& A, const auto& B){ return A.y() < B.y(); });
       merged.push_back(std::move(g.pts));
     }
     return merged;
   }
 
   std::vector<std::vector<Eigen::Vector3f>>
-  second_pass_merge_X(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
+  second_pass_merge_Y(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
     if (groups.empty()) return {};
+
+    // 요약
     std::vector<GroupSummary> gs; gs.reserve(groups.size());
     for (const auto& g : groups) gs.push_back(summarize_group(g));
+
+    // mean_y 기준 정렬(보조), 같으면 min_x
     std::sort(gs.begin(), gs.end(), [](const GroupSummary& a, const GroupSummary& b){
-      if (std::fabs(a.mean_x - b.mean_x) > 1e-6f) return a.mean_x < b.mean_x;
-      return a.min_y < b.min_y;
+      if (std::fabs(a.mean_y - b.mean_y) > 1e-6f) return a.mean_y < b.mean_y;
+      return a.min_x < b.min_x;
     });
 
-    std::vector<GroupSummary> out;
-    out.push_back(gs[0]);
-    for (size_t i = 1; i < gs.size(); ++i) {
-      auto& curr = gs[i];
-      auto& back = out.back();
-      const bool same_col = (std::fabs(curr.mean_x - back.mean_x) <= MERGE_X_BAND);
-      const float gap = closest_endpoint_gap_X(back, curr);
-
-      if (same_col && gap <= MERGE_GAP_X) {
-        back.pts.insert(back.pts.end(), curr.pts.begin(), curr.pts.end());
-        back = summarize_group(back.pts);
-      } else {
-        out.push_back(curr);
+    // 반복 병합: 같은 row 밴드 + 끝점 간격 조건을 만족하는 아무 쌍이나 붙임
+    bool merged_any = true;
+    while (merged_any) {
+      merged_any = false;
+      for (size_t i = 0; i < gs.size(); ++i) {
+        for (size_t j = i + 1; j < gs.size(); ++j) {
+          const bool same_row = (std::fabs(gs[i].mean_y - gs[j].mean_y) <= MERGE_Y_BAND);
+          const float gap = closest_endpoint_gap_Y(gs[i], gs[j]);
+          if (same_row && gap <= MERGE_GAP_Y) {
+            gs[i].pts.insert(gs[i].pts.end(), gs[j].pts.begin(), gs[j].pts.end());
+            gs[i] = summarize_group(gs[i].pts);
+            gs.erase(gs.begin() + j);
+            merged_any = true;
+            break; // i부터 다시
+          }
+        }
+        if (merged_any) break;
       }
     }
 
+    // 반환: x 오름차순으로 정렬해서 가로 폴리라인 연결
     std::vector<std::vector<Eigen::Vector3f>> merged;
-    merged.reserve(out.size());
-    for (auto& g : out) {
-      // 폴리라인 시각화를 위해 y 오름차순 정렬
+    merged.reserve(gs.size());
+    for (auto& g : gs) {
       std::sort(g.pts.begin(), g.pts.end(),
-                [](const auto& A, const auto& B){ return A.y() < B.y(); });
+                [](const auto& A, const auto& B){ return A.x() < B.x(); });
       merged.push_back(std::move(g.pts));
     }
     return merged;
