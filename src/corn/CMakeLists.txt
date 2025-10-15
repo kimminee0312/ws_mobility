@@ -10,6 +10,8 @@ find_package(pcl_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(OpenCV REQUIRED)
+
 
 # PCL 1.13 강제로 /usr/local에서 찾기
 find_package(PCL 1.13 REQUIRED
@@ -32,8 +34,15 @@ ament_target_dependencies(parking_pre_node
 )
 target_link_libraries(parking_pre_node ${PCL_LIBRARIES})
 
+add_executable(rect_fitter_node src/rect_fitter_node.cpp)
+ament_target_dependencies(rect_fitter_node
+  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
+)
+target_link_libraries(rect_fitter_node ${OpenCV_LIBS})
+
 install(TARGETS
   parking_node
   parking_pre_node
+  rect_fitter_node
   DESTINATION lib/${PROJECT_NAME})
 ament_package()

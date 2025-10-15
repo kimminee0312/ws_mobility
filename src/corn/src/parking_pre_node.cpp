@@ -33,20 +33,20 @@ public:
       std::bind(&ParkingPreNode::cloudCallback, this, std::placeholders::_1));
 
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-      "/closest_cone_markers", 10);
+      "/parking_cone_markers", 10);
 
-    pub_marker_groups_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
-      "/cone_group_markers", 1);
+    pub_group_points_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/parking_group_markers", 1);
 
     pub_grid_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
       "/cone_grid", 10);
 
     pub_cluster_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-      "/cone_clusters_colored", 10);
+      "/deg_cone_clusters_colored", 10);
 
     // z-cut 이후 사용 포인트들 시각화(deg)
     pub_deg_zcloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
-      "/points_deg_zfiltered_colored", 10);
+      "/deg_points_deg_zfiltered_colored", 10);
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
@@ -718,6 +718,41 @@ private:
       }
     }
 
+    // === rect_fitter 입력용: 그룹별 POINTS 마커 퍼블리시 ===
+    // groups_x, groups_y 는 cone_local 좌표 기준이라 글로벌로 환원해서 찍어줍니다.
+    visualization_msgs::msg::MarkerArray group_points_arr;
+    {
+      int id = 0;
+      auto emit_group_points = [&](const std::vector<std::vector<Eigen::Vector3f>>& groups,
+                                  const std::string& ns, float r,float g,float b){
+        for (const auto& grp : groups) {
+          if (grp.size() < 2) continue; // 점 2개 미만은 스킵(사각형 핏팅에 불리)
+          visualization_msgs::msg::Marker m;
+          m.header = msg->header;     // 프레임/타임스탬프 동일
+          m.ns = ns;                  // "groupY_pts" / "groupX_pts"
+          m.id = id++;                // 그룹마다 고유 id
+          m.type = visualization_msgs::msg::Marker::POINTS;
+          m.action = visualization_msgs::msg::Marker::ADD;
+          m.scale.x = 0.06; m.scale.y = 0.06; // 점 크기
+          m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 0.95f;
+
+          // cone_local -> 글로벌로 환원
+          for (const auto& lp : grp) {
+            Eigen::Vector3f gp = origin_ + R_ * lp;
+            geometry_msgs::msg::Point P; P.x = gp.x(); P.y = gp.y(); P.z = gp.z();
+            m.points.push_back(P);
+          }
+          group_points_arr.markers.push_back(m);
+        }
+      };
+
+      emit_group_points(groups_y, "groupY_pts", 0.1f, 0.8f, 1.0f); // 하늘색
+      emit_group_points(groups_x, "groupX_pts", 1.0f, 0.6f, 0.1f); // 주황색
+    }
+
+    // ⚠️ 사각형 핏터 입력 전용 토픽
+    pub_group_points_->publish(group_points_arr);
+
     // // --- OccupancyGrid 생성/퍼블리시 (탑다운 2D) ---
     // if (has_initialized_frame_) {
     //   const float RES = 0.10f;
@@ -774,14 +809,13 @@ private:
                           group_markers.markers.begin(), group_markers.markers.end());
 
     pub_marker_->publish(merged);
-    // pub_marker_groups_->publish(group_markers);
   } // cloudCallback
 
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_cloud_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_;
-  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_groups_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_group_points_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr pub_grid_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cluster_cloud_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
