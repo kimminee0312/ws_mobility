@@ -65,6 +65,183 @@ private:
   int last_group_x_count_ = 0;
   int last_group_y_count_ = 0;
 
+  // --- grouping thresholds (tunable) ---
+  // 1차 그룹핑(느슨하게)
+  const float X_EPS_JOIN   = 0.30f;  // X기준: Δx 허용
+  const float Y_EPS_JOIN   = 0.30f;  // Y기준: Δy 허용
+  const float D_EPS_JOIN_X = 1.5f;  // X기준: 전체 거리 상한
+  const float D_EPS_JOIN_Y = 1.5f;  // Y기준: 전체 거리 상한 
+
+  // 2차 병합(보수)
+  const float MERGE_Y_BAND = 0.30f;  // Y모드: 평균 y 차 허용(같은 가로줄)
+  const float MERGE_X_BAND = 0.30f;  // X모드: 평균 x 차 허용(같은 세로줄)
+  const float MERGE_GAP_Y  = 1.50f;  // Y모드 전체 거리 
+  const float MERGE_GAP_X  = 1.5f;  // X모드 전체 거리 
+
+  // --- 1차 합류 판정: 축 차 + 전체거리만 검사 (반대축은 검사하지 않음)
+  bool can_join_X(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
+    const float dx = std::fabs(p.x() - q.x());
+    if (dx > X_EPS_JOIN) return false;               
+    if (D_EPS_JOIN_X > 0.0f && (p - q).norm() > D_EPS_JOIN_X) return false;
+    return true;
+  }
+  bool can_join_Y(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
+    const float dy = std::fabs(p.y() - q.y());
+    if (dy > Y_EPS_JOIN) return false;               
+    if (D_EPS_JOIN_Y > 0.0f && (p - q).norm() > D_EPS_JOIN_Y) return false;
+    return true;
+  }
+
+  // --- 그룹 내에서 |Δy| 최소 / |Δx| 최소 비교점 선택
+  int argmin_abs_y(const std::vector<Eigen::Vector3f>& grp, const Eigen::Vector3f& p) {
+    if (grp.empty()) return -1;
+    int best_i = 0;
+    float best = std::fabs(p.y() - grp[0].y());
+    for (int i = 1; i < (int)grp.size(); ++i) {
+      float v = std::fabs(p.y() - grp[i].y());
+      if (v < best) { best = v; best_i = i; }
+    }
+    return best_i;
+  }
+  int argmin_abs_x(const std::vector<Eigen::Vector3f>& grp, const Eigen::Vector3f& p) {
+    if (grp.empty()) return -1;
+    int best_i = 0;
+    float best = std::fabs(p.x() - grp[0].x());
+    for (int i = 1; i < (int)grp.size(); ++i) {
+      float v = std::fabs(p.x() - grp[i].x());
+      if (v < best) { best = v; best_i = i; }
+    }
+    return best_i;
+  }
+
+  // --- 그룹 요약자
+  struct GroupSummary {
+    std::vector<Eigen::Vector3f> pts;
+    float mean_x = 0.f, mean_y = 0.f;
+    float min_x = 0.f, max_x = 0.f;
+    float min_y = 0.f, max_y = 0.f;
+  };
+  static GroupSummary summarize_group(const std::vector<Eigen::Vector3f>& g) {
+    GroupSummary s; s.pts = g;
+    if (g.empty()) return s;
+    s.min_x = s.max_x = g[0].x();
+    s.min_y = s.max_y = g[0].y();
+    double sumx=0.0, sumy=0.0;
+    for (const auto& p : g) {
+      sumx += p.x(); sumy += p.y();
+      s.min_x = std::min(s.min_x, p.x());
+      s.max_x = std::max(s.max_x, p.x());
+      s.min_y = std::min(s.min_y, p.y());
+      s.max_y = std::max(s.max_y, p.y());
+    }
+    s.mean_x = static_cast<float>(sumx / g.size());
+    s.mean_y = static_cast<float>(sumy / g.size());
+    return s;
+  }
+
+  // --- 두 그룹의 "가장 가까운 끝점" 간 거리(빠른 근사)
+  // Y모드: 가로로 이어 붙이므로 좌/우 끝점 위주
+  static float closest_endpoint_gap_Y(const GroupSummary& a, const GroupSummary& b) {
+    // a의 오른쪽 끝과 b의 왼쪽 끝이 맞닿는 경우가 대부분
+    Eigen::Vector3f a_right(a.max_x, a.mean_y, 0.f);
+    Eigen::Vector3f a_left (a.min_x, a.mean_y, 0.f);
+    Eigen::Vector3f b_right(b.max_x, b.mean_y, 0.f);
+    Eigen::Vector3f b_left (b.min_x, b.mean_y, 0.f);
+    float g1 = (a_right - b_left).head<2>().norm();
+    float g2 = (b_right - a_left).head<2>().norm();
+    return std::min(g1, g2);
+  }
+  // X모드: 세로로 이어 붙이므로 위/아래 끝점 위주
+  static float closest_endpoint_gap_X(const GroupSummary& a, const GroupSummary& b) {
+    Eigen::Vector3f a_top (a.mean_x, a.max_y, 0.f);
+    Eigen::Vector3f a_bot (a.mean_x, a.min_y, 0.f);
+    Eigen::Vector3f b_top (b.mean_x, b.max_y, 0.f);
+    Eigen::Vector3f b_bot (b.mean_x, b.min_y, 0.f);
+    float g1 = (a_top - b_bot).head<2>().norm();
+    float g2 = (b_top - a_bot).head<2>().norm();
+    return std::min(g1, g2);
+  }
+
+  // --- 2차 병합: 같은 줄 후보끼리 인접한 그룹을 붙인다
+  std::vector<std::vector<Eigen::Vector3f>>
+  second_pass_merge_Y(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
+    if (groups.empty()) return {};
+    // 1) 요약 & 정렬: 같은 y줄끼리, 그리고 x가 작은 순으로
+    std::vector<GroupSummary> gs; gs.reserve(groups.size());
+    for (const auto& g : groups) gs.push_back(summarize_group(g));
+    std::sort(gs.begin(), gs.end(), [](const GroupSummary& a, const GroupSummary& b){
+      if (std::fabs(a.mean_y - b.mean_y) > 1e-6f) return a.mean_y < b.mean_y;
+      return a.min_x < b.min_x;
+    });
+
+    // 2) 병합
+    std::vector<GroupSummary> out;
+    out.push_back(gs[0]);
+    for (size_t i = 1; i < gs.size(); ++i) {
+      auto& curr = gs[i];
+      auto& back = out.back();
+      const bool same_row = (std::fabs(curr.mean_y - back.mean_y) <= MERGE_Y_BAND);
+      const float gap = closest_endpoint_gap_Y(back, curr);
+
+      if (same_row && gap <= MERGE_GAP_Y) {
+        // merge: back <- back + curr (정렬/정규화는 다음 시각화에서 폴리라인으로 연결)
+        back.pts.insert(back.pts.end(), curr.pts.begin(), curr.pts.end());
+        // 요약 갱신
+        back = summarize_group(back.pts);
+      } else {
+        out.push_back(curr);
+      }
+    }
+
+    // pts만 반환
+    std::vector<std::vector<Eigen::Vector3f>> merged;
+    merged.reserve(out.size());
+    for (auto& g : out) {
+      // 폴리라인 시각화를 위해 x 오름차순 정렬
+      std::sort(g.pts.begin(), g.pts.end(),
+                [](const auto& A, const auto& B){ return A.x() < B.x(); });
+      merged.push_back(std::move(g.pts));
+    }
+    return merged;
+  }
+
+  std::vector<std::vector<Eigen::Vector3f>>
+  second_pass_merge_X(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
+    if (groups.empty()) return {};
+    std::vector<GroupSummary> gs; gs.reserve(groups.size());
+    for (const auto& g : groups) gs.push_back(summarize_group(g));
+    std::sort(gs.begin(), gs.end(), [](const GroupSummary& a, const GroupSummary& b){
+      if (std::fabs(a.mean_x - b.mean_x) > 1e-6f) return a.mean_x < b.mean_x;
+      return a.min_y < b.min_y;
+    });
+
+    std::vector<GroupSummary> out;
+    out.push_back(gs[0]);
+    for (size_t i = 1; i < gs.size(); ++i) {
+      auto& curr = gs[i];
+      auto& back = out.back();
+      const bool same_col = (std::fabs(curr.mean_x - back.mean_x) <= MERGE_X_BAND);
+      const float gap = closest_endpoint_gap_X(back, curr);
+
+      if (same_col && gap <= MERGE_GAP_X) {
+        back.pts.insert(back.pts.end(), curr.pts.begin(), curr.pts.end());
+        back = summarize_group(back.pts);
+      } else {
+        out.push_back(curr);
+      }
+    }
+
+    std::vector<std::vector<Eigen::Vector3f>> merged;
+    merged.reserve(out.size());
+    for (auto& g : out) {
+      // 폴리라인 시각화를 위해 y 오름차순 정렬
+      std::sort(g.pts.begin(), g.pts.end(),
+                [](const auto& A, const auto& B){ return A.y() < B.y(); });
+      merged.push_back(std::move(g.pts));
+    }
+    return merged;
+  }
+
   void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     // PCL 변환
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
@@ -381,61 +558,68 @@ private:
     if (!local_cones.empty()) {
       std::vector<Eigen::Vector3f> sorted = local_cones;
       std::sort(sorted.begin(), sorted.end(),
-                [](const auto& a, const auto& b){ return a.x() < b.x(); });
+                [](const auto& a, const auto& b){ return a.y() < b.y(); });
 
       std::vector<Eigen::Vector3f> current_group;
-      for (size_t i = 0; i < sorted.size(); ++i) 
-      {
-        if (current_group.empty()) 
-        {
-          current_group.push_back(sorted[i]);
-        } 
-        else 
-        {
-          float diff_x  = std::fabs(sorted[i].x() - current_group.back().x());
-          float dist_xy = (sorted[i] - current_group.back()).norm();
-          if (diff_x < 0.4f && dist_xy < 1.5f) 
-          {
-            current_group.push_back(sorted[i]);
-          } 
-          else 
-          {
-            groups_x.push_back(current_group);
-            current_group.clear();
-            current_group.push_back(sorted[i]);
-          }
+      for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto& p = sorted[i];
+        if (current_group.empty()) {
+          current_group.push_back(p);
+          continue;
+        }
+        // 그룹 내에서 y가 가장 비슷한 점 q 선택
+        int j = argmin_abs_y(current_group, p);
+        const auto& q = current_group[j];
+
+        if (can_join_X(p, q)) {
+          current_group.push_back(p);
+        } else {
+          groups_x.push_back(current_group);
+          current_group.clear();
+          current_group.push_back(p);
         }
       }
       if (!current_group.empty()) groups_x.push_back(current_group);
     }
+
 
     // --- 그룹화 (Y좌표 기준) ---
     std::vector<std::vector<Eigen::Vector3f>> groups_y;
     if (!local_cones.empty()) {
       std::vector<Eigen::Vector3f> sorted = local_cones;
       std::sort(sorted.begin(), sorted.end(),
-                [](const auto& a, const auto& b){ return a.y() < b.y(); });
+                [](const auto& a, const auto& b){ return a.x() < b.x(); });
 
       std::vector<Eigen::Vector3f> current_group;
       for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto& p = sorted[i];
         if (current_group.empty()) {
-          current_group.push_back(sorted[i]);
+          current_group.push_back(p);
+          continue;
+        }
+        // 그룹 내에서 x가 가장 비슷한 점 q 선택
+        int j = argmin_abs_x(current_group, p);
+        const auto& q = current_group[j];
+
+        if (can_join_Y(p, q)) {
+          current_group.push_back(p);
         } else {
-          float diff_y  = std::fabs(sorted[i].y() - current_group.back().y());
-          float dist_xy = (sorted[i] - current_group.back()).norm();
-          if (diff_y < 0.4f && dist_xy < 1.5f) {
-            current_group.push_back(sorted[i]);
-          } else {
-            groups_y.push_back(current_group);
-            current_group.clear();
-            current_group.push_back(sorted[i]);
-          }
+          groups_y.push_back(current_group);
+          current_group.clear();
+          current_group.push_back(p);
         }
       }
       if (!current_group.empty()) groups_y.push_back(current_group);
     }
-    
-    
+
+    // 1차 그룹화 완료 후, 2차 병합 수행 (로그/시각화보다 위)
+    if (!groups_y.empty()) {
+      groups_y = second_pass_merge_Y(groups_y);
+    }
+    if (!groups_x.empty()) {
+      groups_x = second_pass_merge_X(groups_x);
+    }
+
     // --- 그룹화 결과 로그 ---
     RCLCPP_INFO(this->get_logger(), "📌 그룹화 결과 (cone_local 좌표계 기준)");
     RCLCPP_INFO(this->get_logger(), "X축 기준 그룹 수: %zu", groups_x.size());
