@@ -208,7 +208,7 @@ private:
       mx.type = visualization_msgs::msg::Marker::LINE_LIST;
       mx.action = visualization_msgs::msg::Marker::ADD;
       mx.scale.x = 0.06;
-      mx.color.r = 1.0f; mx.color.g = 0.6f; mx.color.b = 0.1f; mx.color.a = 0.6f;
+      mx.color.r = 1.0f; mx.color.g = 0.6f; mx.color.b = 0.1f; mx.color.a = 0.4f;
       for (auto& L : linesX) {
         Eigen::Vector2f A = L.p0 + L.s_min * L.u;
         Eigen::Vector2f B = L.p0 + L.s_max * L.u;
@@ -222,7 +222,7 @@ private:
       my.type = visualization_msgs::msg::Marker::LINE_LIST;
       my.action = visualization_msgs::msg::Marker::ADD;
       my.scale.x = 0.06;
-      my.color.r = 0.1f; my.color.g = 0.7f; my.color.b = 1.0f; my.color.a = 0.6f;
+      my.color.r = 0.1f; my.color.g = 0.7f; my.color.b = 1.0f; my.color.a = 0.4f;
       for (auto& L : linesY) {
         Eigen::Vector2f A = L.p0 + L.s_min * L.u;
         Eigen::Vector2f B = L.p0 + L.s_max * L.u;
@@ -335,7 +335,7 @@ private:
       m.ns = "rects";
       m.id = 0;                                   // 고정 id
       m.type = visualization_msgs::msg::Marker::LINE_LIST;
-      m.scale.x = 0.08;
+      m.scale.x = 0.1;
       m.color.r = 0.2f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 0.98f;
 
       // edges 추가 (각 사각형 4변을 (P_i, P_{i+1}) 쌍으로 push_back)
