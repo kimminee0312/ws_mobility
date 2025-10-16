@@ -46,7 +46,7 @@ public:
     near_colinear_dot_thresh_ = std::cos((angle_bin_tol_deg_) * M_PI/180.0);        // 평행 판단용
     support_tol_dist_ = declare_parameter("support_tol_dist", 0.15); // 15cm
     min_support_pts_per_side_ = declare_parameter("min_support_pts_per_side", 2);
-    edge_min_len_ = declare_parameter("edge_min_len", 2.0); // 각 변 최소 2m
+    edge_min_len_ = declare_parameter("edge_min_len", 1.6); // 각 변 최소 2m
     RCLCPP_INFO(get_logger(), "✅ rect_fitter_node started.");
   }
 
