@@ -62,6 +62,7 @@ private:
   double support_tol_dist_;              // 선으로부터 허용 근접거리 (m)
   int    min_support_pts_per_side_;      // 변 하나당 최소 지지 포인트 수
   double edge_min_len_; 
+  int last_rect_label_count_ = 0;
 
   struct Group {
     std::string ns;
@@ -324,47 +325,75 @@ private:
     }
 
     // 시각화: 사각형들
+    // ====== 시각화: 사각형들 (잔상 방지 버전) ======
     visualization_msgs::msg::MarkerArray rect_arr;
+
+    // 1) 모든 사각형 에지를 한 마커로 (ns=rects, id=0)
     {
-      // 모든 사각형을 한 마커로 그려도 되고, 개별 id로 나눠도 됨.
-      // 여기서는 보기 좋게 각 사각형을 개별 LINE_STRIP으로.
+      visualization_msgs::msg::Marker m;
+      m.header = header;
+      m.ns = "rects";
+      m.id = 0;                                   // 고정 id
+      m.type = visualization_msgs::msg::Marker::LINE_LIST;
+      m.scale.x = 0.08;
+      m.color.r = 0.2f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 0.98f;
+
+      // edges 추가 (각 사각형 4변을 (P_i, P_{i+1}) 쌍으로 push_back)
+      for (auto& R : rects) {
+        for (int i=0;i<4;i++){
+          const auto& A = R.c[i];
+          const auto& B = R.c[(i+1)%4];
+          geometry_msgs::msg::Point pA, pB;
+          pA.x=A.x(); pA.y=A.y(); pA.z=0.0;
+          pB.x=B.x(); pB.y=B.y(); pB.z=0.0;
+          m.points.push_back(pA);
+          m.points.push_back(pB);
+        }
+      }
+
+      // 포인트가 있으면 ADD, 없으면 DELETE로 기존 잔상 제거
+      m.action = m.points.empty()
+              ? visualization_msgs::msg::Marker::DELETE
+              : visualization_msgs::msg::Marker::ADD;
+      rect_arr.markers.push_back(m);
+    }
+
+    // 2) (옵션) 텍스트 라벨: 개별 id로 찍되, 잔여 id는 DELETE
+    {
       int rid = 0;
       for (auto& R : rects) {
-        visualization_msgs::msg::Marker m;
-        m.header = header; m.ns = "rects"; m.id = rid++;
-        m.type = visualization_msgs::msg::Marker::LINE_STRIP;
-        m.action = visualization_msgs::msg::Marker::ADD;
-        m.scale.x = 0.08;
-        m.color.r = 0.2f; m.color.g = 1.0f; m.color.b = 0.2f; m.color.a = 0.98f;
-
-        for (int i=0;i<4;++i){
-          geometry_msgs::msg::Point P; P.x=R.c[i].x(); P.y=R.c[i].y(); P.z=0.0;
-          m.points.push_back(P);
-        }
-        // 닫기
-        geometry_msgs::msg::Point P0; P0.x=R.c[0].x(); P0.y=R.c[0].y(); P0.z=0.0;
-        m.points.push_back(P0);
-
-        rect_arr.markers.push_back(m);
-
-        // 치수 표기(텍스트)
         visualization_msgs::msg::Marker t;
-        t.header = header; t.ns = "rect_labels"; t.id = rid + 10000;
+        t.header = header;
+        t.ns = "rect_labels";
+        t.id = rid;                               // 0..N-1 재사용
         t.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
         t.action = visualization_msgs::msg::Marker::ADD;
         Eigen::Vector2f center = 0.25f*(R.c[0]+R.c[1]+R.c[2]+R.c[3]);
-        t.pose.position.x = center.x(); t.pose.position.y = center.y(); t.pose.position.z = 0.1;
-        t.scale.z = 0.4;
+        t.pose.position.x = center.x();
+        t.pose.position.y = center.y();
+        t.pose.position.z = 0.1;
+        t.scale.z = 0.35;
         t.color.r=1.0; t.color.g=1.0; t.color.b=1.0; t.color.a=1.0;
-        char buf[128]; std::snprintf(buf, sizeof(buf), "w=%.2fm, h=%.2fm", R.w, R.h);
+        char buf[128]; std::snprintf(buf, sizeof(buf), "w=%.2f, h=%.2f", R.w, R.h);
         t.text = buf;
         rect_arr.markers.push_back(t);
+        ++rid;
       }
 
-      // 사각형이 하나도 없을 때 기존 잔여 id 삭제는, 간단히 이전 id 범위를 작게 유지하거나,
-      // 매 프레임 id를 0..N-1로만 쓰는 현재 방식이면 자동으로 덮어써짐.
+      // 지난 프레임보다 라벨 수가 줄었으면, 남은 id들 DELETE
+      for (int i = static_cast<int>(rects.size()); i < last_rect_label_count_; ++i) {
+        visualization_msgs::msg::Marker del;
+        del.header = header;
+        del.ns = "rect_labels";
+        del.id = i;
+        del.action = visualization_msgs::msg::Marker::DELETE;
+        rect_arr.markers.push_back(del);
+      }
+      last_rect_label_count_ = static_cast<int>(rects.size());
     }
+
     pub_rects_->publish(rect_arr);
+
   }
 };
 
