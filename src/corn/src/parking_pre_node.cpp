@@ -16,20 +16,28 @@
 #include <array>
 #include <sstream>
 #include <algorithm>
-#include <nav_msgs/msg/occupancy_grid.hpp>
 #include <pcl/filters/passthrough.h>
 #include <limits>
 
 // TF2
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
+
 
 using PointT = pcl::PointXYZ;
 
 class ParkingPreNode : public rclcpp::Node {
 public:
-  ParkingPreNode() : Node("parking_pre_node") {
+  ParkingPreNode() : Node("parking_pre_node"),
+    buffer_(this->get_clock()),
+    listener_(buffer_)
+    {
+
     sub_cloud_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-      "/points_raw/downsampled", rclcpp::SensorDataQoS(),
+      "/sensing/lidar/concatenated/pointcloud", rclcpp::SensorDataQoS(),
       std::bind(&ParkingPreNode::cloudCallback, this, std::placeholders::_1));
 
     pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -38,21 +46,26 @@ public:
     pub_group_points_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
       "/parking_group_markers", 1);
 
-    pub_grid_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
-      "/cone_grid", 10);
-
     pub_cluster_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
       "/deg_cone_clusters_colored", 10);
 
     // z-cut 이후 사용 포인트들 시각화(deg)
     pub_deg_zcloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
       "/deg_points_deg_zfiltered_colored", 10);
+    
+    pub_test_tf_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/deg_test_tf_points", 10);
 
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     has_initialized_frame_ = false;
     RCLCPP_INFO(this->get_logger(), "✅ ParkingPreNode started.");
+
+    target_frame_ = "map";
+    source_frame_ = "chassis_link";
   }
+
+
 
 private:
   // --- state ---
@@ -67,16 +80,22 @@ private:
 
   // --- grouping thresholds (tunable) ---
   // 1차 그룹핑(느슨하게)
-  const float X_EPS_JOIN   = 0.40f;  // X기준: Δx 허용
-  const float Y_EPS_JOIN   = 0.40f;  // Y기준: Δy 허용
-  const float D_EPS_JOIN_X = 1.5f;  // X기준: 전체 거리 상한
-  const float D_EPS_JOIN_Y = 1.5f;  // Y기준: 전체 거리 상한 
+  const float X_EPS_JOIN   = 0.2f;  // X기준: Δx 허용
+  const float Y_EPS_JOIN   = 0.2f;  // Y기준: Δy 허용
+  const float D_EPS_JOIN_X = 1.0f;  // X기준: 전체 거리 상한
+  const float D_EPS_JOIN_Y = 1.0f;  // Y기준: 전체 거리 상한 
 
   // 2차 병합(보수)
-  const float MERGE_Y_BAND = 0.40f;  // Y모드: 평균 y 차 허용(같은 가로줄)
-  const float MERGE_X_BAND = 0.40f;  // X모드: 평균 x 차 허용(같은 세로줄)
-  const float MERGE_GAP_Y  = 1.50f;  // Y모드 전체 거리 
-  const float MERGE_GAP_X  = 1.5f;  // X모드 전체 거리 
+  const float MERGE_Y_BAND = 0.3f;  // Y모드: 평균 y 차 허용(같은 가로줄)
+  const float MERGE_X_BAND = 0.3f;  // X모드: 평균 x 차 허용(같은 세로줄)
+  const float MERGE_GAP_Y  = 1.0f;  // Y모드 전체 거리 
+  const float MERGE_GAP_X  = 1.0f;  // X모드 전체 거리 
+
+  // TF
+  std::string target_frame_;
+  std::string source_frame_;
+  tf2_ros::Buffer buffer_;
+  tf2_ros::TransformListener listener_;
 
   // --- 1차 합류 판정: 축 차 + 전체거리만 검사 (반대축은 검사하지 않음)
   bool can_join_X(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
@@ -252,6 +271,37 @@ private:
     return merged;
   }
 
+  // XYZ만 가진 PointCloud2 생성(센서 프레임)
+  static sensor_msgs::msg::PointCloud2
+  makeCloudFromCentroids(const std::vector<Eigen::Vector3f>& cs,
+                         const std::string& frame_id,
+                         const rclcpp::Time& stamp)
+  {
+    sensor_msgs::msg::PointCloud2 cloud;
+    cloud.header.frame_id = frame_id;
+    cloud.header.stamp    = stamp;
+    cloud.height = 1;
+    cloud.width  = static_cast<uint32_t>(cs.size());
+    cloud.is_bigendian = false;
+    cloud.is_dense = true;
+
+    sensor_msgs::PointCloud2Modifier mod(cloud);
+    mod.setPointCloud2FieldsByString(1, "xyz");
+    mod.resize(cloud.width); // height=1이므로 width 개수만큼
+
+    sensor_msgs::PointCloud2Iterator<float> it_x(cloud, "x");
+    sensor_msgs::PointCloud2Iterator<float> it_y(cloud, "y");
+    sensor_msgs::PointCloud2Iterator<float> it_z(cloud, "z");
+
+    for (const auto& p : cs) {
+      *it_x = p.x();
+      *it_y = p.y();
+      *it_z = p.z();
+      ++it_x; ++it_y; ++it_z;
+    }
+    return cloud;
+  }
+
   void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     // PCL 변환
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
@@ -311,6 +361,7 @@ private:
       pcl::PointCloud<PointT>::Ptr cluster(new pcl::PointCloud<PointT>);
       cluster->points.reserve(indices.indices.size());
       for (int idx : indices.indices) cluster->push_back((*cloud_z)[idx]);
+    //=====================================================================
 
       // 라바콘 형태 필터 (AABB)
       Eigen::Vector4f min_pt, max_pt;
@@ -427,6 +478,32 @@ private:
       cone_markers.markers.push_back(del);
     }
     last_cone_count_ = cone_count;
+
+
+    //=====================================================================
+    // 맵 좌표계로 좌표 변환 
+    rclcpp::Time stamp(msg->header.stamp);
+    sensor_msgs::msg::PointCloud2 cloud_raw = makeCloudFromCentroids(centroids, source_frame_, stamp);
+    // 2) tf 조회 (source_frame -> target_frame)
+    try {
+      geometry_msgs::msg::TransformStamped tf =
+        buffer_.lookupTransform(target_frame_, source_frame_, cloud_raw.header.stamp);
+
+      // 3) doTransform으로 한 번에 map 프레임으로
+      sensor_msgs::msg::PointCloud2 cloud_map;
+      tf2::doTransform(cloud_raw, cloud_map, tf);
+      cloud_map.header.frame_id = target_frame_; // 안정적으로 보장
+
+      pub_test_tf_->publish(cloud_map);
+    } catch (const tf2::TransformException& ex) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "TF lookup failed %s -> %s: %s",
+                           source_frame_.c_str(), target_frame_.c_str(), ex.what());
+    }
+
+
+    //=====================================================================
+
 
     // === p1/p2/arrow 고정 ns/id로 덮어쓰기 ===
     // 차량 원점(0,0,0) 기준 1번(가장 가까운) 찾기
@@ -753,52 +830,6 @@ private:
     // ⚠️ 사각형 핏터 입력 전용 토픽
     pub_group_points_->publish(group_points_arr);
 
-    // // --- OccupancyGrid 생성/퍼블리시 (탑다운 2D) ---
-    // if (has_initialized_frame_) {
-    //   const float RES = 0.10f;
-    //   const int   W   = 200;
-    //   const int   H   = 200;
-    //   const float HALF_W = (W * RES) * 0.5f;
-    //   const float HALF_H = (H * RES) * 0.5f;
-
-    //   nav_msgs::msg::OccupancyGrid grid;
-    //   grid.header = msg->header;
-    //   grid.header.frame_id = "cone_local";
-    //   grid.info.resolution = RES;
-    //   grid.info.width  = W;
-    //   grid.info.height = H;
-
-    //   // cone_local 좌표계 기준 중앙정렬
-    //   grid.info.origin.position.x = -HALF_W;
-    //   grid.info.origin.position.y = -HALF_H;
-    //   grid.info.origin.position.z = 0.0;
-    //   grid.info.origin.orientation.w = 1.0;
-
-    //   grid.data.assign(W * H, 0);
-
-    //   const float Z_MIN = 0.2f, Z_MAX = 1.5f;
-    //   for (const auto& lp : local_cones) {
-    //     if (lp.z() < Z_MIN || lp.z() > Z_MAX) continue;
-    //     float gx = lp.x() + HALF_W;
-    //     float gy = lp.y() + HALF_H;
-    //     int ix = static_cast<int>(std::floor(gx / RES));
-    //     int iy = static_cast<int>(std::floor(gy / RES));
-    //     if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
-    //     int idx = iy * W + ix;
-    //     grid.data[idx] = 100;
-    //     for (int dy = -1; dy <= 1; ++dy) {
-    //       for (int dx = -1; dx <= 1; ++dx) {
-    //         int nx = ix + dx, ny = iy + dy;
-    //         if (nx >= 0 && ny >= 0 && nx < W && ny < H)
-    //           grid.data[ny * W + nx] = 100;
-    //       }
-    //     }
-    //   }
-    //   pub_grid_->publish(grid);
-    // }
-
-  
-
     // --- 마지막 병합/퍼블리시 (한 번만) ---
     visualization_msgs::msg::MarkerArray merged;
     merged.markers.insert(merged.markers.end(),
@@ -816,10 +847,11 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_cloud_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_group_points_;
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr pub_grid_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cluster_cloud_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_deg_zcloud_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_test_tf_;
+
 };
 
 int main(int argc, char** argv) {

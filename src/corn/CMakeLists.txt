@@ -8,10 +8,13 @@ find_package(visualization_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(pcl_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
-
+find_package(tf2_sensor_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_eigen REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 
 # PCL 1.13 강제로 /usr/local에서 찾기
 find_package(PCL 1.13 REQUIRED
@@ -30,7 +33,11 @@ target_link_libraries(parking_node ${PCL_LIBRARIES})
 
 add_executable(parking_pre_node src/parking_pre_node.cpp)
 ament_target_dependencies(parking_pre_node
-  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
+  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs nav_msgs tf2_sensor_msgs
+  tf2
+  tf2_ros
+  tf2_sensor_msgs
+  tf2_eigen
 )
 target_link_libraries(parking_pre_node ${PCL_LIBRARIES})
 
