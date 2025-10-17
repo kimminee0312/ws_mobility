@@ -18,6 +18,9 @@
 #include <algorithm>
 #include <pcl/filters/passthrough.h>
 #include <limits>
+#include <string>
+#include <deque>
+
 
 // TF2
 #include <tf2_ros/transform_broadcaster.h>
@@ -56,6 +59,13 @@ public:
     pub_test_tf_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
       "/deg_test_tf_points", 10);
 
+    pub_accum_centroids_  = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/deg_parking_pre/accum_centroids", 10);
+
+    pub_stable_centroids_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/deg_parking_pre/stable_cones", 10);
+
+
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
     has_initialized_frame_ = false;
@@ -63,11 +73,34 @@ public:
 
     target_frame_ = "map";
     source_frame_ = "chassis_link";
+
+    // ★ 파라미터(누적/재클러스터링/확정 저장)
+    window_size_       = declare_parameter<int>("centroid_window_size", 30);
+    accum_tol_         = declare_parameter<double>("accum_cluster_tolerance", 0.20);
+    accum_min_pts_     = declare_parameter<int>("accum_min_points", 3);
+    accum_max_pts_     = declare_parameter<int>("accum_max_points", 10000);
+    stable_merge_dist_ = declare_parameter<double>("stable_merge_dist", 0.30);
+    stable_hits_needed_= declare_parameter<int>("stable_confirm_hits", 3);
+    stable_ttl_frames_ = declare_parameter<int>("stable_ttl_frames", 120);
   }
 
 
 
 private:
+  // ★ 누적 버퍼: 맵 좌표계 centroid들(최근 30프레임)
+  std::deque<std::vector<Eigen::Vector3f>> ring_map_centroids_;
+  int window_size_;             // 위에서 declare_parameter
+  double accum_tol_;
+  int accum_min_pts_, accum_max_pts_;
+
+  // ★ 확정 저장(간단 NN 트래킹)
+  struct Track { Eigen::Vector3f pos; int hits=0; int last_seen=0; };
+  std::vector<Track> tracks_;
+  int frame_counter_ = 0;
+  double stable_merge_dist_;
+  int stable_hits_needed_;
+  int stable_ttl_frames_;
+
   // --- state ---
   bool has_initialized_frame_;
   Eigen::Vector3f origin_;
@@ -302,6 +335,94 @@ private:
     return cloud;
   }
 
+  // ===== 유틸: 누적 & 평탄화 =====
+  void accumulateMapCentroids(const std::vector<Eigen::Vector3f>& frame_centroids_map){
+    ring_map_centroids_.push_back(frame_centroids_map);
+    while((int)ring_map_centroids_.size() > window_size_) ring_map_centroids_.pop_front();
+  }
+  std::vector<Eigen::Vector3f> flattenAccum() const {
+    size_t total=0; for (auto& v: ring_map_centroids_) total += v.size();
+    std::vector<Eigen::Vector3f> out; out.reserve(total);
+    for (auto& v: ring_map_centroids_) out.insert(out.end(), v.begin(), v.end());
+    return out;
+  }
+
+  // ★ 유틸: 누적점 재클러스터링 → 안정화 centroid
+  std::vector<Eigen::Vector3f> reclusterStable(const std::vector<Eigen::Vector3f>& pts2d) {
+    if (pts2d.empty()) return {};
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
+    cloud->points.reserve(pts2d.size());
+    for (const auto& p : pts2d) cloud->points.emplace_back(p.x(), p.y(), p.z());
+    cloud->width = cloud->points.size(); cloud->height = 1; cloud->is_dense = true;
+
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
+    tree->setInputCloud(cloud);
+
+    std::vector<pcl::PointIndices> clusters;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
+    ec.setClusterTolerance(accum_tol_);
+    ec.setMinClusterSize(accum_min_pts_);
+    ec.setMaxClusterSize(accum_max_pts_);
+    ec.setSearchMethod(tree);
+    ec.setInputCloud(cloud);
+    ec.extract(clusters); // EUC
+
+    std::vector<Eigen::Vector3f> out; out.reserve(clusters.size());
+    for (const auto& idx : clusters) {
+      Eigen::Matrix<float,4,1> c4;
+      pcl::compute3DCentroid(*cloud, idx, c4);
+      out.emplace_back(c4.x(), c4.y(), c4.z());
+    }
+    return out;
+  }
+
+  // ★ 트래킹 업데이트 → 확정 리스트 반환
+  std::vector<Eigen::Vector3f> updateTracks(const std::vector<Eigen::Vector3f>& stable_now){
+    ++frame_counter_;
+    // 1) 관측 흡수
+    for (const auto& z : stable_now){
+      int best=-1; double bd=1e9;
+      for (int i=0;i<(int)tracks_.size();++i){
+        double d=(tracks_[i].pos - z).norm();
+        if (d<bd){bd=d; best=i;}
+      }
+      if (best>=0 && bd <= stable_merge_dist_){
+        tracks_[best].pos = 0.5f*(tracks_[best].pos + z);
+        tracks_[best].hits += 1;
+        tracks_[best].last_seen = frame_counter_;
+      }else{
+        Track t; t.pos=z; t.hits=1; t.last_seen=frame_counter_;
+        tracks_.push_back(t);
+      }
+    }
+    // 2) 만료 제거
+    tracks_.erase(std::remove_if(tracks_.begin(), tracks_.end(),
+                 [&](const Track& t){ return (frame_counter_-t.last_seen)>stable_ttl_frames_; }),
+                 tracks_.end());
+    // 3) 확정만 반환
+    std::vector<Eigen::Vector3f> confirmed;
+    for (auto& t: tracks_) if (t.hits >= stable_hits_needed_) confirmed.push_back(t.pos);
+    return confirmed;
+  }
+
+  // ★ 시각화: SPHERE_LIST 만들기
+  visualization_msgs::msg::MarkerArray makeSphereList(const std::vector<Eigen::Vector3f>& pts,
+                                                      const std_msgs::msg::Header& h,
+                                                      const std::string& ns,
+                                                      float r,float g,float b,float a=0.95f){
+    visualization_msgs::msg::MarkerArray arr;
+    visualization_msgs::msg::Marker m;
+    m.header = h; m.ns = ns; m.id = 0;
+    m.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    m.action = visualization_msgs::msg::Marker::ADD;
+    m.scale.x = m.scale.y = m.scale.z = 0.25;
+    m.color.r=r; m.color.g=g; m.color.b=b; m.color.a=a;
+    for (auto& p: pts){ geometry_msgs::msg::Point q; q.x=p.x(); q.y=p.y(); q.z=0.0; m.points.push_back(q); }
+    if (m.points.empty()) m.action = visualization_msgs::msg::Marker::DELETE;
+    arr.markers.push_back(m);
+    return arr;
+  }
+
   void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     // PCL 변환
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
@@ -480,55 +601,79 @@ private:
     last_cone_count_ = cone_count;
 
 
-    //=====================================================================
+    //===============================================================================================
     // 맵 좌표계로 좌표 변환 
     rclcpp::Time stamp(msg->header.stamp);
     sensor_msgs::msg::PointCloud2 cloud_raw = makeCloudFromCentroids(centroids, source_frame_, stamp);
+    std::vector<Eigen::Vector3f> confirmed;
+    sensor_msgs::msg::PointCloud2 cloud_map;
+
     // 2) tf 조회 (source_frame -> target_frame)
     try {
       geometry_msgs::msg::TransformStamped tf =
         buffer_.lookupTransform(target_frame_, source_frame_, cloud_raw.header.stamp);
 
       // 3) doTransform으로 한 번에 map 프레임으로
-      sensor_msgs::msg::PointCloud2 cloud_map;
       tf2::doTransform(cloud_raw, cloud_map, tf);
       cloud_map.header.frame_id = target_frame_; // 안정적으로 보장
-
       pub_test_tf_->publish(cloud_map);
+
+      // ★★ 1) 이 프레임의 "맵 좌표계" centroid 벡터 만들기
+      Eigen::Isometry3d T_map_from_src = tf2::transformToEigen(tf.transform);
+      std::vector<Eigen::Vector3f> frame_centroids_map; 
+      frame_centroids_map.reserve(centroids.size());
+      for (const auto& c : centroids){
+        Eigen::Vector3d v(c.x(), c.y(), c.z());
+        Eigen::Vector3d vm = T_map_from_src * v; // 동차좌표 없이 Isometry3d 곱셈 가능
+        frame_centroids_map.emplace_back(static_cast<float>(vm.x()),
+                                        static_cast<float>(vm.y()),
+                                        static_cast<float>(vm.z()));
+      }
+
+      // ★★ 2) 30프레임 누적
+      accumulateMapCentroids(frame_centroids_map);
+
+      // ★★ 3) 누적 평탄화 → 재클러스터링으로 안정화 centroid
+      auto accum_pts   = flattenAccum();
+      auto stable_now  = reclusterStable(accum_pts);
+
+      // ★★ 4) 트래킹 갱신 → "확정 라바콘" 얻기(지나간 것도 계속 기억)
+      confirmed = updateTracks(stable_now);
+
+      // ★★ 5) 시각화 퍼블리시(맵 프레임)
+      std_msgs::msg::Header map_header = cloud_map.header; // frame_id="map"
+      pub_accum_centroids_->publish( makeSphereList(accum_pts,  map_header, "accum_centroids", 0.2f,0.7f,1.0f) ); // 하늘색
+      pub_stable_centroids_->publish( makeSphereList(confirmed, map_header, "stable_cones",    0.6f,0.2f,1.0f) ); // 퍼플
+
     } catch (const tf2::TransformException& ex) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
                            "TF lookup failed %s -> %s: %s",
                            source_frame_.c_str(), target_frame_.c_str(), ex.what());
-    }
-    //=====================================================================
-    //centroids 좌표 누적 후 평균 값 구하기 -> 튀는 값 보정/일관성
-    
-
-
-    //=====================================================================
+    } 
+    //=====================================================================================================
 
     // === p1/p2/arrow 고정 ns/id로 덮어쓰기 ===
     // 차량 원점(0,0,0) 기준 1번(가장 가까운) 찾기
     auto dist2d = [](const Eigen::Vector3f& p){ return std::hypot(p.x(), p.y()); };
     int first_idx = -1;
     float best = 1e9f;
-    for (int i = 0; i < static_cast<int>(centroids.size()); ++i) {
-      float d = dist2d(centroids[i]);
+    for (int i = 0; i < static_cast<int>(confirmed.size()); ++i) {
+      float d = dist2d(confirmed[i]);
       if (d < best) { best = d; first_idx = i; }
     }
 
     visualization_msgs::msg::MarkerArray p12_arr;
     if (first_idx >= 0) {
-      const Eigen::Vector3f p1 = centroids[first_idx];
+      const Eigen::Vector3f p1 = confirmed[first_idx];
       int second_idx = -1;
       best = 1e9f;
       const float MAX_P12_DIST = 1.5f;
 
-      for (int i = 0; i < static_cast<int>(centroids.size()); ++i) {
+      for (int i = 0; i < static_cast<int>(confirmed.size()); ++i) {
         if (i == first_idx) continue;
-        float d_vehicle = std::hypot(centroids[i].x(), centroids[i].y());
-        float d12_xy = std::hypot(centroids[i].x() - p1.x(),
-                                  centroids[i].y() - p1.y());
+        float d_vehicle = std::hypot(confirmed[i].x(), confirmed[i].y());
+        float d12_xy = std::hypot(confirmed[i].x() - p1.x(),
+                                  confirmed[i].y() - p1.y());
         if (d12_xy <= MAX_P12_DIST && d_vehicle < best) {
           best = d_vehicle;
           second_idx = i;
@@ -538,7 +683,7 @@ private:
       // p1 marker
       {
         visualization_msgs::msg::Marker m;
-        m.header = msg->header; m.ns = "p12"; m.id = 0;
+        m.header = cloud_map.header; m.ns = "p12"; m.id = 0;
         m.type = visualization_msgs::msg::Marker::SPHERE;
         m.action = visualization_msgs::msg::Marker::ADD;
         m.pose.position.x = p1.x(); 
@@ -550,12 +695,12 @@ private:
       }
 
       if (second_idx >= 0) {
-        const Eigen::Vector3f p2 = centroids[second_idx];
+        const Eigen::Vector3f p2 = confirmed[second_idx];
 
         // p2 marker
         {
           visualization_msgs::msg::Marker m;
-          m.header = msg->header; m.ns = "p12"; m.id = 1;
+          m.header = cloud_map.header; m.ns = "p12"; m.id = 1;
           m.type = visualization_msgs::msg::Marker::SPHERE; m.action = visualization_msgs::msg::Marker::ADD;
           m.pose.position.x = p2.x(); m.pose.position.y = p2.y(); m.pose.position.z = p2.z();
           m.scale.x = m.scale.y = m.scale.z = 0.4;
@@ -566,7 +711,7 @@ private:
         // arrow 1->2
         {
           visualization_msgs::msg::Marker m;
-          m.header = msg->header; m.ns = "p12"; m.id = 2;
+          m.header = cloud_map.header; m.ns = "p12"; m.id = 2;
           m.type = visualization_msgs::msg::Marker::ARROW; m.action = visualization_msgs::msg::Marker::ADD;
           geometry_msgs::msg::Point A,B; A.x=p1.x(); A.y=p1.y(); A.z=p1.z();
           B.x=p2.x(); B.y=p2.y(); B.z=p2.z();
@@ -592,7 +737,7 @@ private:
           Eigen::Quaternionf q(R); q.normalize();
 
           geometry_msgs::msg::TransformStamped T;
-          T.header = msg->header;                 // 이 시각의 TF로 브로드캐스트
+          T.header = cloud_map.header;                 // 이 시각의 TF로 브로드캐스트
           T.child_frame_id = "cone_local";
           T.transform.translation.x = p1.x();
           T.transform.translation.y = p1.y();
@@ -634,9 +779,9 @@ private:
 
     // --- 이후부터는 cone_local 기준 변환 (초기화된 경우에만) ---
     std::vector<Eigen::Vector3f> local_cones;
-    local_cones.reserve(centroids.size());
+    local_cones.reserve(confirmed.size());
     if (has_initialized_frame_) {
-      for (const auto& c : centroids) {
+      for (const auto& c : confirmed) {
         Eigen::Vector3f local = R_.transpose() * (c - origin_);
         local_cones.push_back(local);
       }
@@ -752,7 +897,7 @@ private:
     // ---------------------- X: 마커 1개 ----------------------
     {
       visualization_msgs::msg::Marker mx;
-      mx.header = msg->header;
+      mx.header = cloud_map.header;
       mx.ns = "group_x";
       mx.id = 0;  // X는 항상 id=0
       mx.type = visualization_msgs::msg::Marker::LINE_LIST;
@@ -777,7 +922,7 @@ private:
     // ---------------------- Y: 마커 1개 ----------------------
     {
       visualization_msgs::msg::Marker my;
-      my.header = msg->header;
+      my.header = cloud_map.header;
       my.ns = "group_y";
       my.id = 0;  // Y도 항상 id=0
       my.type = visualization_msgs::msg::Marker::LINE_LIST; // LINE_STRIP 대신 LINE_LIST로 병합
@@ -807,7 +952,7 @@ private:
         for (const auto& grp : groups) {
           if (grp.size() < 2) continue; // 점 2개 미만은 스킵(사각형 핏팅에 불리)
           visualization_msgs::msg::Marker m;
-          m.header = msg->header;     // 프레임/타임스탬프 동일
+          m.header = cloud_map.header;     // 프레임/타임스탬프 동일
           m.ns = ns;                  // "groupY_pts" / "groupX_pts"
           m.id = id++;                // 그룹마다 고유 id
           m.type = visualization_msgs::msg::Marker::POINTS;
@@ -853,6 +998,8 @@ private:
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_deg_zcloud_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_test_tf_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_accum_centroids_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_stable_centroids_;
 
 };
 
