@@ -422,7 +422,7 @@ private:
     arr.markers.push_back(m);
     return arr;
   }
-
+  // ============================================== 본격 콜백 ================================================
   void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
     // PCL 변환
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
@@ -430,7 +430,7 @@ private:
     if (cloud->empty()) return;
 
 
-    // ✅ z > -0.21 m 필터링 (지면 근처 제거)
+    // z > -0.21 m 필터링 (지면 근처 제거)
     pcl::PointCloud<PointT>::Ptr cloud_z(new pcl::PointCloud<PointT>);
     {
       pcl::PassThrough<PointT> pass;
@@ -567,40 +567,6 @@ private:
       }
     }
 
-    // === 모든 라바콘(라바콘 후보) 원기둥 마커 (ns/id 재사용 + 남는 id DELETE) ===
-    visualization_msgs::msg::MarkerArray cone_markers;
-    int cone_count = 0;
-    for (const auto& c : centroids) {
-      visualization_msgs::msg::Marker m;
-      m.header = msg->header;
-      m.ns = "all_cones";     // 고정 ns
-      m.id = cone_count++;    // 0..N-1 재사용
-      m.type = visualization_msgs::msg::Marker::CYLINDER;
-      m.action = visualization_msgs::msg::Marker::ADD;
-      m.pose.position.x = c.x();
-      m.pose.position.y = c.y();
-      m.pose.position.z = c.z();
-      m.scale.x = 0.3;   // 지름
-      m.scale.y = 0.3;
-      m.scale.z = 0.6;   // 높이
-      m.color.r = 0.0;
-      m.color.g = 0.0;
-      m.color.b = 1.0;   // 파란색
-      m.color.a = 0.8;
-      cone_markers.markers.push_back(m);
-    }
-    // 사라진 나머지 id 삭제
-    for (int i = cone_count; i < last_cone_count_; ++i) {
-      visualization_msgs::msg::Marker del;
-      del.header = msg->header;
-      del.ns = "all_cones";
-      del.id = i;
-      del.action = visualization_msgs::msg::Marker::DELETE;
-      cone_markers.markers.push_back(del);
-    }
-    last_cone_count_ = cone_count;
-
-
     //===============================================================================================
     // 맵 좌표계로 좌표 변환 
     rclcpp::Time stamp(msg->header.stamp);
@@ -651,6 +617,39 @@ private:
                            source_frame_.c_str(), target_frame_.c_str(), ex.what());
     } 
     //=====================================================================================================
+
+    // === 모든 라바콘(라바콘 후보) 원기둥 마커 (ns/id 재사용 + 남는 id DELETE) ===
+    visualization_msgs::msg::MarkerArray cone_markers;
+    int cone_count = 0;
+    for (const auto& c : confirmed) {
+      visualization_msgs::msg::Marker m;
+      m.header = cloud_map.header;
+      m.ns = "all_cones";     // 고정 ns
+      m.id = cone_count++;    // 0..N-1 재사용
+      m.type = visualization_msgs::msg::Marker::CYLINDER;
+      m.action = visualization_msgs::msg::Marker::ADD;
+      m.pose.position.x = c.x();
+      m.pose.position.y = c.y();
+      m.pose.position.z = c.z();
+      m.scale.x = 0.3;   // 지름
+      m.scale.y = 0.3;
+      m.scale.z = 0.6;   // 높이
+      m.color.r = 0.0;
+      m.color.g = 0.0;
+      m.color.b = 1.0;   // 파란색
+      m.color.a = 0.8;
+      cone_markers.markers.push_back(m);
+    }
+    // 사라진 나머지 id 삭제
+    for (int i = cone_count; i < last_cone_count_; ++i) {
+      visualization_msgs::msg::Marker del;
+      del.header = msg->header;
+      del.ns = "all_cones";
+      del.id = i;
+      del.action = visualization_msgs::msg::Marker::DELETE;
+      cone_markers.markers.push_back(del);
+    }
+    last_cone_count_ = cone_count;
 
     // === p1/p2/arrow 고정 ns/id로 덮어쓰기 ===
     // 차량 원점(0,0,0) 기준 1번(가장 가까운) 찾기

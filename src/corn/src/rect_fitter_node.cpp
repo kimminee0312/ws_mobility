@@ -9,6 +9,9 @@
 #include <array>
 #include <cstdio>
 
+#include <geometry_msgs/msg/pose_stamped.hpp>   // PoseStamped
+
+
 using std::placeholders::_1;
 
 struct Line2D {
@@ -33,10 +36,11 @@ public:
       "/parking_group_markers", 10, std::bind(&RectFitterNode::onMarkers, this, _1));
     pub_lines_ = create_publisher<visualization_msgs::msg::MarkerArray>("/rect_fitter/lines", 10);
     pub_rects_ = create_publisher<visualization_msgs::msg::MarkerArray>("/rect_fitter/rects", 10);
+    pub_goal_  = create_publisher<geometry_msgs::msg::PoseStamped>("/parking_goal", 10); 
 
     // params
     extension_len_ = declare_parameter("extension_len", 1.0);
-    extension_len_ext5_ = declare_parameter("extension_len_ext5", 2.5); // ★ 5m 추가
+    extension_len_ext5_ = declare_parameter("extension_len_ext5", 12.0); // ★ 5m 추가
     angle_bin_tol_deg_ = declare_parameter("angle_bin_tol_deg", 5.0);
     min_side_len_ = declare_parameter("min_side_len", 0.8);
     max_side_len_ = declare_parameter("max_side_len", 6.0);
@@ -47,6 +51,11 @@ public:
     edge_min_len_ = declare_parameter("edge_min_len", 1.2);
     max_edge_len_strict_ = declare_parameter("max_edge_len_strict", 5.0); // ★ 기본 5 m
 
+    // RectFitterNode 생성자 내부 파라미터 선언부 근처에 추가
+    cluster_radius_ = declare_parameter("cluster_radius", 0.5);   // ★ 추가: 같은 위치로 간주할 반경(m)
+    min_cluster_size_ = declare_parameter("min_cluster_size", 1); // ★ 추가: 최소 클러스터 크기
+
+
     RCLCPP_INFO(get_logger(), "✅ rect_fitter_node started.");
   }
 
@@ -54,6 +63,7 @@ private:
   rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr sub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_lines_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_rects_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_goal_; 
 
   double extension_len_, extension_len_ext5_;
   double angle_bin_tol_deg_;
@@ -65,6 +75,17 @@ private:
   int last_rect_label_count_ = 0;
   int last_rect_label_count_ext5_ = 0; // ★ 빨강 라벨 잔상 제거용
   double max_edge_len_strict_; 
+  double cluster_radius_{0.3};   // ★ 추가
+  int    min_cluster_size_{1};   // ★ 추가
+
+  geometry_msgs::msg::Quaternion yawToQuat(double yaw) {
+    geometry_msgs::msg::Quaternion q;
+    q.x = 0.0;
+    q.y = 0.0;
+    q.z = std::sin(yaw * 0.5);
+    q.w = std::cos(yaw * 0.5);
+    return q;
+  }
 
   struct Group { std::string ns; int id; std::vector<Eigen::Vector2f> pts; };
 
@@ -140,6 +161,16 @@ private:
 
   // 사각형 구조
   struct Rect { Eigen::Vector2f c[4]; float w, h; };
+
+  static Eigen::Vector2f rectCenter(const RectFitterNode::Rect& R){      // ★ 추가
+    return 0.25f*(R.c[0]+R.c[1]+R.c[2]+R.c[3]);
+  }
+  static double rectYawLongEdge(const RectFitterNode::Rect& R){           // ★ 추가
+    Eigen::Vector2f v01=(R.c[1]-R.c[0]);
+    Eigen::Vector2f v12=(R.c[2]-R.c[1]);
+    Eigen::Vector2f dir = (v01.norm() >= v12.norm()) ? v01.normalized() : v12.normalized();
+    return std::atan2(dir.y(), dir.x());
+  }
 
   // 유틸: 평행/직교
   bool is_orthogonal(const Eigen::Vector2f& a, const Eigen::Vector2f& b){
@@ -261,6 +292,71 @@ private:
                     (std::fabs(A.h-B.h) <= 0.25f*std::max(A.h,B.h));
     return (dc < 0.5f) && size_sim;
   }
+
+  // 빨간 사각형 중심들을 거리 R 이내로 연결한 연결요소(클러스터) 중 최대 크기를 선택
+  std::optional<std::pair<Eigen::Vector2f,double>>
+  selectMostFrequentRedGoal(const std::vector<Rect>& red_rects){
+    if (red_rects.empty()) return std::nullopt;
+
+    const float R = static_cast<float>(cluster_radius_);
+
+    struct Item{ Eigen::Vector2f c; double yaw; };
+    std::vector<Item> items; items.reserve(red_rects.size());
+    for (auto& rr : red_rects){
+      items.push_back({rectCenter(rr), rectYawLongEdge(rr)});
+    }
+
+    const int n = (int)items.size();
+    std::vector<int> label(n, -1);
+    int cluster_id = 0;
+
+    // O(n^2) 연결요소 라벨링 (single-link 느낌)
+    for (int i=0;i<n;++i){
+      if (label[i] != -1) continue;
+      std::vector<int> q; q.push_back(i);
+      label[i] = cluster_id;
+      for (size_t qi=0; qi<q.size(); ++qi){
+        int u = q[qi];
+        for (int v=0; v<n; ++v){
+          if (label[v] != -1) continue;
+          if ((items[u].c - items[v].c).norm() <= R){
+            label[v] = cluster_id;
+            q.push_back(v);
+          }
+        }
+      }
+      ++cluster_id;
+    }
+
+    int K = cluster_id;
+    std::vector<int> counts(K,0);
+    std::vector<Eigen::Vector2f> sum_c(K, Eigen::Vector2f::Zero());
+    std::vector<double> sum_cos(K,0.0), sum_sin(K,0.0);
+
+    for (int i=0;i<n;++i){
+      int k = label[i];
+      counts[k]++;
+      sum_c[k] += items[i].c;
+      sum_cos[k] += std::cos(items[i].yaw);
+      sum_sin[k] += std::sin(items[i].yaw);
+    }
+
+    // 최대 클러스터 (최소 크기 조건 우선)
+    int best_k = -1, best_cnt = -1;
+    for (int k=0;k<K;++k){
+      if (counts[k] < min_cluster_size_) continue;
+      if (counts[k] > best_cnt){ best_cnt = counts[k]; best_k = k; }
+    }
+    if (best_k == -1){ // 모두 너무 작으면 그냥 최대를 선택
+      best_k = std::max_element(counts.begin(), counts.end()) - counts.begin();
+      best_cnt = counts[best_k];
+    }
+
+    Eigen::Vector2f c_avg = sum_c[best_k] / (float)counts[best_k];
+    double yaw_avg = std::atan2(sum_sin[best_k], sum_cos[best_k]);
+    return std::make_pair(c_avg, yaw_avg);
+  }
+
 
   void onMarkers(const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
     std::vector<Group> groupsX, groupsY;
@@ -431,6 +527,29 @@ private:
     }
 
     pub_rects_->publish(rect_arr);
+
+    // ---------- 가장 많이 빨갛게 잡힌 위치 → /parking_goal ----------
+    if (!red_rects.empty()){
+      auto sel = selectMostFrequentRedGoal(red_rects);
+      if (sel){
+        const Eigen::Vector2f& c = sel->first;
+        double yaw = sel->second;
+
+        geometry_msgs::msg::PoseStamped goal;
+        goal.header.stamp = this->get_clock()->now();
+        goal.header.frame_id = header.frame_id;      // 들어온 마커 좌표계(대개 "map")
+        goal.pose.position.x = c.x();
+        goal.pose.position.y = c.y();
+        goal.pose.position.z = 0.0;
+        goal.pose.orientation = yawToQuat(yaw);
+
+        pub_goal_->publish(goal);
+        RCLCPP_INFO_THROTTLE(get_logger(), *this->get_clock(), 1000,
+          "📍 /parking_goal (most-frequent red) → (%.2f, %.2f), yaw=%.1f°, N_red=%zu",
+          goal.pose.position.x, goal.pose.position.y,
+          yaw * 180.0 / M_PI, red_rects.size());
+      }
+    }
   }
 };
 
