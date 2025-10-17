@@ -35,16 +35,16 @@ public:
     pub_rects_ = create_publisher<visualization_msgs::msg::MarkerArray>("/rect_fitter/rects", 10);
 
     // params
-    extension_len_ = declare_parameter("extension_len", 1.7);
-    extension_len_ext5_ = declare_parameter("extension_len_ext5", 5.0); // ★ 5m 추가
-    angle_bin_tol_deg_ = declare_parameter("angle_bin_tol_deg", 15.0);
+    extension_len_ = declare_parameter("extension_len", 1.0);
+    extension_len_ext5_ = declare_parameter("extension_len_ext5", 2.5); // ★ 5m 추가
+    angle_bin_tol_deg_ = declare_parameter("angle_bin_tol_deg", 5.0);
     min_side_len_ = declare_parameter("min_side_len", 0.8);
-    max_side_len_ = declare_parameter("max_side_len", 10.0);
+    max_side_len_ = declare_parameter("max_side_len", 6.0);
     near_parallel_dot_thresh_ = std::cos((90.0 - angle_bin_tol_deg_) * M_PI/180.0);
     near_colinear_dot_thresh_ = std::cos((angle_bin_tol_deg_) * M_PI/180.0);
     support_tol_dist_ = declare_parameter("support_tol_dist", 0.15);
     min_support_pts_per_side_ = declare_parameter("min_support_pts_per_side", 1);
-    edge_min_len_ = declare_parameter("edge_min_len", 1.4);
+    edge_min_len_ = declare_parameter("edge_min_len", 1.2);
     max_edge_len_strict_ = declare_parameter("max_edge_len_strict", 5.0); // ★ 기본 5 m
 
     RCLCPP_INFO(get_logger(), "✅ rect_fitter_node started.");
@@ -102,6 +102,12 @@ private:
     return L;
   }
 
+  static bool isPureExtensionSegment(const Line2D& L, float sa, float sb, float eps = 1e-5f) {
+    if (sa > sb) std::swap(sa, sb);
+    float inter_len = std::min(sb, L.smax_raw) - std::max(sa, L.smin_raw);
+    return inter_len <= eps; // 원본 구간과 교집합 길이 ≈ 0 → 순수 연장
+  }
+
   static bool intersectLinesST(const Line2D& A, const Line2D& B,
                                Eigen::Vector2f& out, float& s_out, float& t_out,
                                bool clamp_to_segments = true) {
@@ -147,7 +153,10 @@ private:
   std::vector<Rect> generateRects(const std::vector<Line2D>& linesX,
                                   const std::vector<Line2D>& linesY,
                                   bool require_support,
-                                  int support_k = 4) {
+                                  int support_k = 4,
+                                  bool strict_rect = false,
+                                  bool require_pure_extension_one_edge = false,
+                                  bool require_support_for_non_pure_edges = false) {
     std::vector<Rect> rects;
     for (size_t i=0;i<linesX.size();++i){
       for (size_t j=i+1;j<linesX.size();++j){
@@ -167,6 +176,25 @@ private:
             int sup_e2 = countSupportOnSegment(linesX[j], s_j_k, s_j_l, support_tol_dist_, min_support_pts_per_side_);
             int sup_e1 = countSupportOnSegment(linesY[k], t_k_i, t_k_j, support_tol_dist_, min_support_pts_per_side_);
             int sup_e3 = countSupportOnSegment(linesY[l], t_l_i, t_l_j, support_tol_dist_, min_support_pts_per_side_);
+
+            // 각 변이 '순수 연장'인지 판정
+            bool pure0 = isPureExtensionSegment(linesX[i], s_i_k, s_i_l);
+            bool pure2 = isPureExtensionSegment(linesX[j], s_j_k, s_j_l);
+            bool pure1 = isPureExtensionSegment(linesY[k], t_k_i, t_k_j);
+            bool pure3 = isPureExtensionSegment(linesY[l], t_l_i, t_l_j);
+
+            // 규칙 A: 최소 한 변은 순수 연장부
+            if (require_pure_extension_one_edge) {
+              if (!(pure0 || pure1 || pure2 || pure3)) continue;
+            }
+
+            // 규칙 B: 순수 연장이 아닌 변들은 '각각' 지지점이 기준 이상이어야 함
+            if (require_support_for_non_pure_edges) {
+              if (!pure0 && sup_e0 < min_support_pts_per_side_) continue;
+              if (!pure1 && sup_e1 < min_support_pts_per_side_) continue;
+              if (!pure2 && sup_e2 < min_support_pts_per_side_) continue;
+              if (!pure3 && sup_e3 < min_support_pts_per_side_) continue;
+            }
 
             if (require_support) {
               if (sup_e0 < min_support_pts_per_side_ ||
@@ -293,8 +321,12 @@ private:
     auto green_rects = generateRects(linesX, linesY, /*require_support=*/true);
 
     // B) 빨강(5m 연장, 지지 완화: k-of-4, 여기선 k=0로 완전 허용도 가능)
-    auto red_candidates = generateRects(linesX5, linesY5, /*require_support=*/false, /*support_k=*/1);
-
+    auto red_candidates = generateRects(linesX5, linesY5,
+                                        /*require_support=*/false,    // 내부에서 k-of-4 안 씀
+                                        /*support_k=*/0,              // 의미없음
+                                        /*strict_rect=*/true,         // (권장) 직교/평행 더 타이트
+                                        /*require_pure_extension_one_edge=*/true,       // 규칙 A
+                                        /*require_support_for_non_pure_edges=*/true);    // 규칙 B
     // C) 겹치지 않는 빨강만 남기기
     std::vector<Rect> red_rects;
     for (const auto& rr : red_candidates){
@@ -350,6 +382,7 @@ private:
         rect_arr.markers.push_back(del);
       }
       last_rect_label_count_ = (int)green_rects.size();
+      RCLCPP_INFO(get_logger(), "주차 블가능 공간 개수: %zu", green_rects.size());
     }
 
     // 빨강 LINE_LIST (edges, 겹치지 않는 것만)
@@ -394,6 +427,7 @@ private:
         rect_arr.markers.push_back(del);
       }
       last_rect_label_count_ext5_ = (int)red_rects.size();
+      RCLCPP_INFO(get_logger(), "주차 가능 공간 개수: %zu", red_rects.size());
     }
 
     pub_rects_->publish(rect_arr);
