@@ -3,10 +3,10 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
 
-    parking_pre_node = Node(
+    parking_final_node = Node(
         package='corn',                   
-        executable='parking_pre_node',     
-        name='parking_pre_node',
+        executable='parking_final_node',     
+        name='parking_final_node',
         output='screen',
         parameters=[{
             'slot_width_nom': 2.4,
@@ -15,10 +15,10 @@ def generate_launch_description():
         }]
     )
 
-    rect_fitter_node = Node(
+    cone_find_node = Node(
         package='corn',                   
-        executable='rect_fitter_node',     
-        name='rect_fitter_node',
+        executable='cone_find_node',     
+        name='cone_find_node',
         output='screen',
         parameters=[{
             'extension_len': 1.0,
@@ -30,6 +30,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        parking_pre_node,
-        rect_fitter_node
+        parking_final_node,
+        cone_find_node
     ])

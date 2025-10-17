@@ -29,11 +29,11 @@ static float wrapAngle(float a){
 }
 static float rad2deg(float r){ return r*180.f/static_cast<float>(M_PI); }
 
-class RectFitterNode : public rclcpp::Node {
+class ParkingFinalNode : public rclcpp::Node {
 public:
-  RectFitterNode() : Node("rect_fitter_node") {
+  ParkingFinalNode() : Node("rect_fitter_node") {
     sub_ = create_subscription<visualization_msgs::msg::MarkerArray>(
-      "/parking_group_markers", 10, std::bind(&RectFitterNode::onMarkers, this, _1));
+      "/parking_group_markers", 10, std::bind(&ParkingFinalNode::onMarkers, this, _1));
     pub_lines_ = create_publisher<visualization_msgs::msg::MarkerArray>("/rect_fitter/lines", 10);
     pub_rects_ = create_publisher<visualization_msgs::msg::MarkerArray>("/rect_fitter/rects", 10);
     pub_goal_  = create_publisher<geometry_msgs::msg::PoseStamped>("/parking_goal", 10); 
@@ -51,12 +51,12 @@ public:
     edge_min_len_ = declare_parameter("edge_min_len", 1.2);
     max_edge_len_strict_ = declare_parameter("max_edge_len_strict", 5.0); // ★ 기본 5 m
 
-    // RectFitterNode 생성자 내부 파라미터 선언부 근처에 추가
+    // ParkingFinalNode 생성자 내부 파라미터 선언부 근처에 추가
     cluster_radius_ = declare_parameter("cluster_radius", 0.5);   // ★ 추가: 같은 위치로 간주할 반경(m)
     min_cluster_size_ = declare_parameter("min_cluster_size", 1); // ★ 추가: 최소 클러스터 크기
 
 
-    RCLCPP_INFO(get_logger(), "✅ rect_fitter_node started.");
+    RCLCPP_INFO(get_logger(), "✅ parking final node started.");
   }
 
 private:
@@ -162,10 +162,10 @@ private:
   // 사각형 구조
   struct Rect { Eigen::Vector2f c[4]; float w, h; };
 
-  static Eigen::Vector2f rectCenter(const RectFitterNode::Rect& R){      // ★ 추가
+  static Eigen::Vector2f rectCenter(const ParkingFinalNode::Rect& R){      // ★ 추가
     return 0.25f*(R.c[0]+R.c[1]+R.c[2]+R.c[3]);
   }
-  static double rectYawLongEdge(const RectFitterNode::Rect& R){           // ★ 추가
+  static double rectYawLongEdge(const ParkingFinalNode::Rect& R){           // ★ 추가
     Eigen::Vector2f v01=(R.c[1]-R.c[0]);
     Eigen::Vector2f v12=(R.c[2]-R.c[1]);
     Eigen::Vector2f dir = (v01.norm() >= v12.norm()) ? v01.normalized() : v12.normalized();
@@ -555,7 +555,7 @@ private:
 
 int main(int argc, char** argv){
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<RectFitterNode>());
+  rclcpp::spin(std::make_shared<ParkingFinalNode>());
   rclcpp::shutdown();
   return 0;
 }

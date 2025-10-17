@@ -1,0 +1,1010 @@
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_types.h>
+#include <pcl/common/common.h>
+#include <pcl/segmentation/extract_clusters.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/common/centroid.h>
+#include <Eigen/Dense>
+#include <cmath>
+#include <memory>
+#include <optional>
+#include <iomanip>
+#include <array>
+#include <sstream>
+#include <algorithm>
+#include <pcl/filters/passthrough.h>
+#include <limits>
+#include <string>
+#include <deque>
+
+
+// TF2
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
+
+
+using PointT = pcl::PointXYZ;
+
+class ConeFindNode : public rclcpp::Node {
+public:
+  ConeFindNode() : Node("parking_pre_node"),
+    buffer_(this->get_clock()),
+    listener_(buffer_)
+    {
+
+    sub_cloud_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+      "/sensing/lidar/concatenated/pointcloud", rclcpp::SensorDataQoS(),
+      std::bind(&ConeFindNode::cloudCallback, this, std::placeholders::_1));
+
+    pub_marker_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/parking_cone_markers", 10);
+
+    pub_group_points_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/parking_group_markers", 1);
+
+    pub_cluster_cloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/deg_cone_clusters_colored", 10);
+
+    // z-cut 이후 사용 포인트들 시각화(deg)
+    pub_deg_zcloud_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/deg_points_deg_zfiltered_colored", 10);
+    
+    pub_test_tf_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/deg_test_tf_points", 10);
+
+    pub_accum_centroids_  = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/deg_parking_pre/accum_centroids", 10);
+
+    pub_stable_centroids_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+      "/deg_parking_pre/stable_cones", 10);
+
+
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+
+    has_initialized_frame_ = false;
+    RCLCPP_INFO(this->get_logger(), "✅ ConeFindNode started.");
+
+    target_frame_ = "map";
+    source_frame_ = "chassis_link";
+
+    // ★ 파라미터(누적/재클러스터링/확정 저장)
+    window_size_       = declare_parameter<int>("centroid_window_size", 30);
+    accum_tol_         = declare_parameter<double>("accum_cluster_tolerance", 0.20);
+    accum_min_pts_     = declare_parameter<int>("accum_min_points", 3);
+    accum_max_pts_     = declare_parameter<int>("accum_max_points", 10000);
+    stable_merge_dist_ = declare_parameter<double>("stable_merge_dist", 0.30);
+    stable_hits_needed_= declare_parameter<int>("stable_confirm_hits", 3);
+    stable_ttl_frames_ = declare_parameter<int>("stable_ttl_frames", 120);
+  }
+
+
+
+private:
+  // ★ 누적 버퍼: 맵 좌표계 centroid들(최근 30프레임)
+  std::deque<std::vector<Eigen::Vector3f>> ring_map_centroids_;
+  int window_size_;             // 위에서 declare_parameter
+  double accum_tol_;
+  int accum_min_pts_, accum_max_pts_;
+
+  // ★ 확정 저장(간단 NN 트래킹)
+  struct Track { Eigen::Vector3f pos; int hits=0; int last_seen=0; };
+  std::vector<Track> tracks_;
+  int frame_counter_ = 0;
+  double stable_merge_dist_;
+  int stable_hits_needed_;
+  int stable_ttl_frames_;
+
+  // --- state ---
+  bool has_initialized_frame_;
+  Eigen::Vector3f origin_;
+  Eigen::Matrix3f R_;
+
+  // for ns/id reuse & selective DELETE
+  int last_cone_count_ = 0;
+  int last_group_x_count_ = 0;
+  int last_group_y_count_ = 0;
+
+  // --- grouping thresholds (tunable) ---
+  // 1차 그룹핑(느슨하게)
+  const float X_EPS_JOIN   = 0.2f;  // X기준: Δx 허용
+  const float Y_EPS_JOIN   = 0.2f;  // Y기준: Δy 허용
+  const float D_EPS_JOIN_X = 1.0f;  // X기준: 전체 거리 상한
+  const float D_EPS_JOIN_Y = 1.0f;  // Y기준: 전체 거리 상한 
+
+  // 2차 병합(보수)
+  const float MERGE_Y_BAND = 0.3f;  // Y모드: 평균 y 차 허용(같은 가로줄)
+  const float MERGE_X_BAND = 0.3f;  // X모드: 평균 x 차 허용(같은 세로줄)
+  const float MERGE_GAP_Y  = 1.0f;  // Y모드 전체 거리 
+  const float MERGE_GAP_X  = 1.0f;  // X모드 전체 거리 
+
+  // TF
+  std::string target_frame_;
+  std::string source_frame_;
+  tf2_ros::Buffer buffer_;
+  tf2_ros::TransformListener listener_;
+
+  // --- 1차 합류 판정: 축 차 + 전체거리만 검사 (반대축은 검사하지 않음)
+  bool can_join_X(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
+    const float dx = std::fabs(p.x() - q.x());
+    if (dx > X_EPS_JOIN) return false;               
+    if (D_EPS_JOIN_X > 0.0f && (p.head<2>() - q.head<2>()).norm() > D_EPS_JOIN_X) return false;
+    return true;
+  }
+  bool can_join_Y(const Eigen::Vector3f& p, const Eigen::Vector3f& q) {
+    const float dy = std::fabs(p.y() - q.y());
+    if (dy > Y_EPS_JOIN) return false;               
+    if (D_EPS_JOIN_Y > 0.0f && (p.head<2>() - q.head<2>()).norm() > D_EPS_JOIN_Y) return false;
+    return true;
+  }
+
+  // --- 그룹 내에서 |Δy| 최소 / |Δx| 최소 비교점 선택
+  int argmin_abs_y(const std::vector<Eigen::Vector3f>& grp, const Eigen::Vector3f& p) {
+    if (grp.empty()) return -1;
+    int best_i = 0;
+    float best = std::fabs(p.y() - grp[0].y());
+    for (int i = 1; i < (int)grp.size(); ++i) {
+      float v = std::fabs(p.y() - grp[i].y());
+      if (v < best) { best = v; best_i = i; }
+    }
+    return best_i;
+  }
+  int argmin_abs_x(const std::vector<Eigen::Vector3f>& grp, const Eigen::Vector3f& p) {
+    if (grp.empty()) return -1;
+    int best_i = 0;
+    float best = std::fabs(p.x() - grp[0].x());
+    for (int i = 1; i < (int)grp.size(); ++i) {
+      float v = std::fabs(p.x() - grp[i].x());
+      if (v < best) { best = v; best_i = i; }
+    }
+    return best_i;
+  }
+
+  // --- 그룹 요약자
+  struct GroupSummary {
+    std::vector<Eigen::Vector3f> pts;
+    float mean_x = 0.f, mean_y = 0.f;
+    float min_x = 0.f, max_x = 0.f;
+    float min_y = 0.f, max_y = 0.f;
+  };
+  static GroupSummary summarize_group(const std::vector<Eigen::Vector3f>& g) {
+    GroupSummary s; s.pts = g;
+    if (g.empty()) return s;
+    s.min_x = s.max_x = g[0].x();
+    s.min_y = s.max_y = g[0].y();
+    double sumx=0.0, sumy=0.0;
+    for (const auto& p : g) {
+      sumx += p.x(); sumy += p.y();
+      s.min_x = std::min(s.min_x, p.x());
+      s.max_x = std::max(s.max_x, p.x());
+      s.min_y = std::min(s.min_y, p.y());
+      s.max_y = std::max(s.max_y, p.y());
+    }
+    s.mean_x = static_cast<float>(sumx / g.size());
+    s.mean_y = static_cast<float>(sumy / g.size());
+    return s;
+  }
+
+  // --- 두 그룹의 "가장 가까운 끝점" 간 거리(빠른 근사)
+  // Y모드: 가로로 이어 붙이므로 좌/우 끝점 위주
+  static float closest_endpoint_gap_Y(const GroupSummary& a, const GroupSummary& b) {
+    // a의 오른쪽 끝과 b의 왼쪽 끝이 맞닿는 경우가 대부분
+    Eigen::Vector3f a_right(a.max_x, a.mean_y, 0.f);
+    Eigen::Vector3f a_left (a.min_x, a.mean_y, 0.f);
+    Eigen::Vector3f b_right(b.max_x, b.mean_y, 0.f);
+    Eigen::Vector3f b_left (b.min_x, b.mean_y, 0.f);
+    float g1 = (a_right - b_left).head<2>().norm();
+    float g2 = (b_right - a_left).head<2>().norm();
+    return std::min(g1, g2);
+  }
+  // X모드: 세로로 이어 붙이므로 위/아래 끝점 위주
+  static float closest_endpoint_gap_X(const GroupSummary& a, const GroupSummary& b) {
+    Eigen::Vector3f a_top (a.mean_x, a.max_y, 0.f);
+    Eigen::Vector3f a_bot (a.mean_x, a.min_y, 0.f);
+    Eigen::Vector3f b_top (b.mean_x, b.max_y, 0.f);
+    Eigen::Vector3f b_bot (b.mean_x, b.min_y, 0.f);
+    float g1 = (a_top - b_bot).head<2>().norm();
+    float g2 = (b_top - a_bot).head<2>().norm();
+    return std::min(g1, g2);
+  }
+
+  // --- 2차 병합: 같은 줄 후보끼리 인접한 그룹을 붙인다
+  std::vector<std::vector<Eigen::Vector3f>>
+  second_pass_merge_X(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
+    if (groups.empty()) return {};
+    // 1) 요약
+    std::vector<GroupSummary> gs; gs.reserve(groups.size());
+    for (const auto& g : groups) gs.push_back(summarize_group(g));
+    // 2) 먼저 mean_x 기준 정렬(가독성; 필수는 아님)
+    std::sort(gs.begin(), gs.end(), [](const GroupSummary& a, const GroupSummary& b){
+      if (std::fabs(a.mean_x - b.mean_x) > 1e-6f) return a.mean_x < b.mean_x;
+      return a.min_y < b.min_y;
+    });
+
+    // 3) 반복 병합: 어떤 쌍이라도 붙을 수 있으면 붙이고 다시 처음부터
+    bool merged_any = true;
+    while (merged_any) {
+      merged_any = false;
+      for (size_t i = 0; i < gs.size(); ++i) {
+        for (size_t j = i + 1; j < gs.size(); ++j) {
+          const bool same_col = (std::fabs(gs[i].mean_x - gs[j].mean_x) <= MERGE_X_BAND);
+          const float gap = closest_endpoint_gap_X(gs[i], gs[j]);
+          if (same_col && gap <= MERGE_GAP_X) {
+            // i <- i + j
+            gs[i].pts.insert(gs[i].pts.end(), gs[j].pts.begin(), gs[j].pts.end());
+            gs[i] = summarize_group(gs[i].pts);
+            gs.erase(gs.begin() + j);
+            merged_any = true;
+            break; // j 루프 탈출, i부터 다시
+          }
+        }
+        if (merged_any) break;
+      }
+    }
+
+    // 4) pts만 반환 (폴리라인용 y 오름차순 정렬)
+    std::vector<std::vector<Eigen::Vector3f>> merged;
+    merged.reserve(gs.size());
+    for (auto& g : gs) {
+      std::sort(g.pts.begin(), g.pts.end(),
+                [](const auto& A, const auto& B){ return A.y() < B.y(); });
+      merged.push_back(std::move(g.pts));
+    }
+    return merged;
+  }
+
+  std::vector<std::vector<Eigen::Vector3f>>
+  second_pass_merge_Y(const std::vector<std::vector<Eigen::Vector3f>>& groups) {
+    if (groups.empty()) return {};
+
+    // 요약
+    std::vector<GroupSummary> gs; gs.reserve(groups.size());
+    for (const auto& g : groups) gs.push_back(summarize_group(g));
+
+    // mean_y 기준 정렬(보조), 같으면 min_x
+    std::sort(gs.begin(), gs.end(), [](const GroupSummary& a, const GroupSummary& b){
+      if (std::fabs(a.mean_y - b.mean_y) > 1e-6f) return a.mean_y < b.mean_y;
+      return a.min_x < b.min_x;
+    });
+
+    // 반복 병합: 같은 row 밴드 + 끝점 간격 조건을 만족하는 아무 쌍이나 붙임
+    bool merged_any = true;
+    while (merged_any) {
+      merged_any = false;
+      for (size_t i = 0; i < gs.size(); ++i) {
+        for (size_t j = i + 1; j < gs.size(); ++j) {
+          const bool same_row = (std::fabs(gs[i].mean_y - gs[j].mean_y) <= MERGE_Y_BAND);
+          const float gap = closest_endpoint_gap_Y(gs[i], gs[j]);
+          if (same_row && gap <= MERGE_GAP_Y) {
+            gs[i].pts.insert(gs[i].pts.end(), gs[j].pts.begin(), gs[j].pts.end());
+            gs[i] = summarize_group(gs[i].pts);
+            gs.erase(gs.begin() + j);
+            merged_any = true;
+            break; // i부터 다시
+          }
+        }
+        if (merged_any) break;
+      }
+    }
+
+    // 반환: x 오름차순으로 정렬해서 가로 폴리라인 연결
+    std::vector<std::vector<Eigen::Vector3f>> merged;
+    merged.reserve(gs.size());
+    for (auto& g : gs) {
+      std::sort(g.pts.begin(), g.pts.end(),
+                [](const auto& A, const auto& B){ return A.x() < B.x(); });
+      merged.push_back(std::move(g.pts));
+    }
+    return merged;
+  }
+
+  // XYZ만 가진 PointCloud2 생성(센서 프레임)
+  static sensor_msgs::msg::PointCloud2
+  makeCloudFromCentroids(const std::vector<Eigen::Vector3f>& cs,
+                         const std::string& frame_id,
+                         const rclcpp::Time& stamp)
+  {
+    sensor_msgs::msg::PointCloud2 cloud;
+    cloud.header.frame_id = frame_id;
+    cloud.header.stamp    = stamp;
+    cloud.height = 1;
+    cloud.width  = static_cast<uint32_t>(cs.size());
+    cloud.is_bigendian = false;
+    cloud.is_dense = true;
+
+    sensor_msgs::PointCloud2Modifier mod(cloud);
+    mod.setPointCloud2FieldsByString(1, "xyz");
+    mod.resize(cloud.width); // height=1이므로 width 개수만큼
+
+    sensor_msgs::PointCloud2Iterator<float> it_x(cloud, "x");
+    sensor_msgs::PointCloud2Iterator<float> it_y(cloud, "y");
+    sensor_msgs::PointCloud2Iterator<float> it_z(cloud, "z");
+
+    for (const auto& p : cs) {
+      *it_x = p.x();
+      *it_y = p.y();
+      *it_z = p.z();
+      ++it_x; ++it_y; ++it_z;
+    }
+    return cloud;
+  }
+
+  // ===== 유틸: 누적 & 평탄화 =====
+  void accumulateMapCentroids(const std::vector<Eigen::Vector3f>& frame_centroids_map){
+    ring_map_centroids_.push_back(frame_centroids_map);
+    while((int)ring_map_centroids_.size() > window_size_) ring_map_centroids_.pop_front();
+  }
+  std::vector<Eigen::Vector3f> flattenAccum() const {
+    size_t total=0; for (auto& v: ring_map_centroids_) total += v.size();
+    std::vector<Eigen::Vector3f> out; out.reserve(total);
+    for (auto& v: ring_map_centroids_) out.insert(out.end(), v.begin(), v.end());
+    return out;
+  }
+
+  // ★ 유틸: 누적점 재클러스터링 → 안정화 centroid
+  std::vector<Eigen::Vector3f> reclusterStable(const std::vector<Eigen::Vector3f>& pts2d) {
+    if (pts2d.empty()) return {};
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>());
+    cloud->points.reserve(pts2d.size());
+    for (const auto& p : pts2d) cloud->points.emplace_back(p.x(), p.y(), p.z());
+    cloud->width = cloud->points.size(); cloud->height = 1; cloud->is_dense = true;
+
+    pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>());
+    tree->setInputCloud(cloud);
+
+    std::vector<pcl::PointIndices> clusters;
+    pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
+    ec.setClusterTolerance(accum_tol_);
+    ec.setMinClusterSize(accum_min_pts_);
+    ec.setMaxClusterSize(accum_max_pts_);
+    ec.setSearchMethod(tree);
+    ec.setInputCloud(cloud);
+    ec.extract(clusters); // EUC
+
+    std::vector<Eigen::Vector3f> out; out.reserve(clusters.size());
+    for (const auto& idx : clusters) {
+      Eigen::Matrix<float,4,1> c4;
+      pcl::compute3DCentroid(*cloud, idx, c4);
+      out.emplace_back(c4.x(), c4.y(), c4.z());
+    }
+    return out;
+  }
+
+  // ★ 트래킹 업데이트 → 확정 리스트 반환
+  std::vector<Eigen::Vector3f> updateTracks(const std::vector<Eigen::Vector3f>& stable_now){
+    ++frame_counter_;
+    // 1) 관측 흡수
+    for (const auto& z : stable_now){
+      int best=-1; double bd=1e9;
+      for (int i=0;i<(int)tracks_.size();++i){
+        double d=(tracks_[i].pos - z).norm();
+        if (d<bd){bd=d; best=i;}
+      }
+      if (best>=0 && bd <= stable_merge_dist_){
+        tracks_[best].pos = 0.5f*(tracks_[best].pos + z);
+        tracks_[best].hits += 1;
+        tracks_[best].last_seen = frame_counter_;
+      }else{
+        Track t; t.pos=z; t.hits=1; t.last_seen=frame_counter_;
+        tracks_.push_back(t);
+      }
+    }
+    // 2) 만료 제거
+    tracks_.erase(std::remove_if(tracks_.begin(), tracks_.end(),
+                 [&](const Track& t){ return (frame_counter_-t.last_seen)>stable_ttl_frames_; }),
+                 tracks_.end());
+    // 3) 확정만 반환
+    std::vector<Eigen::Vector3f> confirmed;
+    for (auto& t: tracks_) if (t.hits >= stable_hits_needed_) confirmed.push_back(t.pos);
+    return confirmed;
+  }
+
+  // ★ 시각화: SPHERE_LIST 만들기
+  visualization_msgs::msg::MarkerArray makeSphereList(const std::vector<Eigen::Vector3f>& pts,
+                                                      const std_msgs::msg::Header& h,
+                                                      const std::string& ns,
+                                                      float r,float g,float b,float a=0.95f){
+    visualization_msgs::msg::MarkerArray arr;
+    visualization_msgs::msg::Marker m;
+    m.header = h; m.ns = ns; m.id = 0;
+    m.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+    m.action = visualization_msgs::msg::Marker::ADD;
+    m.scale.x = m.scale.y = m.scale.z = 0.25;
+    m.color.r=r; m.color.g=g; m.color.b=b; m.color.a=a;
+    for (auto& p: pts){ geometry_msgs::msg::Point q; q.x=p.x(); q.y=p.y(); q.z=0.0; m.points.push_back(q); }
+    if (m.points.empty()) m.action = visualization_msgs::msg::Marker::DELETE;
+    arr.markers.push_back(m);
+    return arr;
+  }
+  // ============================================== 본격 콜백 ================================================
+  void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg) {
+    // PCL 변환
+    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
+    pcl::fromROSMsg(*msg, *cloud);
+    if (cloud->empty()) return;
+
+
+    // z > -0.21 m 필터링 (지면 근처 제거)
+    pcl::PointCloud<PointT>::Ptr cloud_z(new pcl::PointCloud<PointT>);
+    {
+      pcl::PassThrough<PointT> pass;
+      pass.setInputCloud(cloud);
+      pass.setFilterFieldName("z");
+      pass.setFilterLimits(-0.21f, std::numeric_limits<float>::max());
+      pass.filter(*cloud_z);
+    }
+    if (cloud_z->empty()) return;
+
+    // === z-cut을 통과한 포인트만 보라색으로 퍼블리시 (deg) ===
+    {
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr zcolored(new pcl::PointCloud<pcl::PointXYZRGB>);
+      zcolored->points.reserve(cloud_z->points.size());
+      for (const auto& p : cloud_z->points) {
+        pcl::PointXYZRGB prgb;
+        prgb.x = p.x; prgb.y = p.y; prgb.z = p.z;
+        prgb.r = 255; prgb.g = 0; prgb.b = 255;  // 보라색
+        zcolored->points.push_back(prgb);
+      }
+      zcolored->width  = static_cast<uint32_t>(zcolored->points.size());
+      zcolored->height = 1;
+      zcolored->is_dense = false;
+      sensor_msgs::msg::PointCloud2 zmsg;
+      pcl::toROSMsg(*zcolored, zmsg);
+      zmsg.header = msg->header;
+      pub_deg_zcloud_->publish(zmsg);
+    }
+
+    // --- 클러스터링 (필터된 점군으로) ---
+    pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
+    tree->setInputCloud(cloud_z);
+
+    std::vector<pcl::PointIndices> cluster_indices;
+    pcl::EuclideanClusterExtraction<PointT> ec;
+    ec.setClusterTolerance(0.5);
+    ec.setMinClusterSize(1);
+    ec.setMaxClusterSize(20000000);
+    ec.setSearchMethod(tree);
+    ec.setInputCloud(cloud_z);
+    ec.extract(cluster_indices);
+
+    std::vector<Eigen::Vector3f> centroids;
+    pcl::PointCloud<PointT>::Ptr cloud_outer(new pcl::PointCloud<PointT>);
+
+    centroids.reserve(cluster_indices.size());
+
+    for (const auto& indices : cluster_indices) {
+      pcl::PointCloud<PointT>::Ptr cluster(new pcl::PointCloud<PointT>);
+      cluster->points.reserve(indices.indices.size());
+      for (int idx : indices.indices) cluster->push_back((*cloud_z)[idx]);
+    //=====================================================================
+
+      // 라바콘 형태 필터 (AABB)
+      Eigen::Vector4f min_pt, max_pt;
+      pcl::getMinMax3D(*cluster, min_pt, max_pt);
+      float height = max_pt.z() - min_pt.z();
+      float width  = max_pt.x() - min_pt.x();
+      float depth  = max_pt.y() - min_pt.y();
+      if (height < 0.1f || height > 1.0f || width > 0.4f || depth > 0.4f) {
+        *cloud_outer += *cluster;
+        continue;
+      }
+
+      // 중심점
+      Eigen::Vector4f c;
+      pcl::compute3DCentroid(*cluster, c);
+      centroids.push_back(c.head<3>());
+    }
+
+    // --- 라바콘 2차 검출 ---
+    if (!cloud_outer->empty()) {
+      pcl::search::KdTree<PointT>::Ptr tree2(new pcl::search::KdTree<PointT>);
+      tree2->setInputCloud(cloud_outer);
+
+      std::vector<pcl::PointIndices> cluster_indices2;
+      pcl::EuclideanClusterExtraction<PointT> ec2;
+      ec2.setClusterTolerance(0.3);   // 더 촘촘하게
+      ec2.setMinClusterSize(2);
+      ec2.setMaxClusterSize(1200);
+      ec2.setSearchMethod(tree2);
+      ec2.setInputCloud(cloud_outer);
+      ec2.extract(cluster_indices2);
+
+      static const std::array<std::array<uint8_t,3>, 12> PALETTE = {{
+        {255,  59,  48}, {255, 149,   0}, {255, 204,   0}, { 52, 199,  89},
+        {  0, 199, 190}, { 48, 176, 199}, { 88,  86, 214}, {255,  45,  85},
+        {142, 142, 147}, {162, 132,  94}, { 64, 156, 255}, {100, 210, 255}
+      }};
+
+      pcl::PointCloud<pcl::PointXYZRGB>::Ptr colored_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
+      colored_cloud->is_dense = false;
+
+      size_t cid = 0;
+      for (const auto& indices2 : cluster_indices2) {
+        const auto& col = PALETTE[cid % PALETTE.size()];
+        ++cid;
+
+        pcl::PointCloud<PointT>::Ptr cluster2(new pcl::PointCloud<PointT>);
+        cluster2->points.reserve(indices2.indices.size());
+        for (int idx : indices2.indices) cluster2->push_back((*cloud_outer)[idx]);
+
+        Eigen::Vector4f min_pt2, max_pt2;
+        pcl::getMinMax3D(*cluster2, min_pt2, max_pt2);
+        float h2 = max_pt2.z() - min_pt2.z();
+        float w2 = max_pt2.x() - min_pt2.x();
+        float d2 = max_pt2.y() - min_pt2.y();
+
+        bool cone_like2 =
+          (h2 >= 0.1f && h2 <= 1.0f) &&
+          (w2 <= 0.5f) &&
+          (d2 <= 0.5f);
+        if (!cone_like2) continue;
+
+        Eigen::Vector4f c2;
+        pcl::compute3DCentroid(*cluster2, c2);
+        centroids.push_back(c2.head<3>());
+
+        colored_cloud->points.reserve(colored_cloud->points.size() + cluster2->points.size());
+        for (const auto& p : cluster2->points) {
+          pcl::PointXYZRGB prgb;
+          prgb.x = p.x; prgb.y = p.y; prgb.z = p.z;
+          prgb.r = col[0]; prgb.g = col[1]; prgb.b = col[2];
+          colored_cloud->points.push_back(prgb);
+        }
+      }
+
+      if (!colored_cloud->points.empty()) {
+        sensor_msgs::msg::PointCloud2 msg_out;
+        pcl::toROSMsg(*colored_cloud, msg_out);
+        msg_out.header = msg->header;
+        msg_out.header.frame_id = msg->header.frame_id;
+        pub_cluster_cloud_->publish(msg_out);
+      }
+    }
+
+    //===============================================================================================
+    // 맵 좌표계로 좌표 변환 
+    rclcpp::Time stamp(msg->header.stamp);
+    sensor_msgs::msg::PointCloud2 cloud_raw = makeCloudFromCentroids(centroids, source_frame_, stamp);
+    std::vector<Eigen::Vector3f> confirmed;
+    sensor_msgs::msg::PointCloud2 cloud_map;
+
+    // 2) tf 조회 (source_frame -> target_frame)
+    try {
+      geometry_msgs::msg::TransformStamped tf =
+        buffer_.lookupTransform(target_frame_, source_frame_, cloud_raw.header.stamp);
+
+      // 3) doTransform으로 한 번에 map 프레임으로
+      tf2::doTransform(cloud_raw, cloud_map, tf);
+      cloud_map.header.frame_id = target_frame_; // 안정적으로 보장
+      pub_test_tf_->publish(cloud_map);
+
+      // ★★ 1) 이 프레임의 "맵 좌표계" centroid 벡터 만들기
+      Eigen::Isometry3d T_map_from_src = tf2::transformToEigen(tf.transform);
+      std::vector<Eigen::Vector3f> frame_centroids_map; 
+      frame_centroids_map.reserve(centroids.size());
+      for (const auto& c : centroids){
+        Eigen::Vector3d v(c.x(), c.y(), c.z());
+        Eigen::Vector3d vm = T_map_from_src * v; // 동차좌표 없이 Isometry3d 곱셈 가능
+        frame_centroids_map.emplace_back(static_cast<float>(vm.x()),
+                                        static_cast<float>(vm.y()),
+                                        static_cast<float>(vm.z()));
+      }
+
+      // ★★ 2) 30프레임 누적
+      accumulateMapCentroids(frame_centroids_map);
+
+      // ★★ 3) 누적 평탄화 → 재클러스터링으로 안정화 centroid
+      auto accum_pts   = flattenAccum();
+      auto stable_now  = reclusterStable(accum_pts);
+
+      // ★★ 4) 트래킹 갱신 → "확정 라바콘" 얻기(지나간 것도 계속 기억)
+      confirmed = updateTracks(stable_now);
+
+      // ★★ 5) 시각화 퍼블리시(맵 프레임)
+      std_msgs::msg::Header map_header = cloud_map.header; // frame_id="map"
+      pub_accum_centroids_->publish( makeSphereList(accum_pts,  map_header, "accum_centroids", 0.2f,0.7f,1.0f) ); // 하늘색
+      pub_stable_centroids_->publish( makeSphereList(confirmed, map_header, "stable_cones",    0.6f,0.2f,1.0f) ); // 퍼플
+
+    } catch (const tf2::TransformException& ex) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "TF lookup failed %s -> %s: %s",
+                           source_frame_.c_str(), target_frame_.c_str(), ex.what());
+    } 
+    //=====================================================================================================
+
+    // === 모든 라바콘(라바콘 후보) 원기둥 마커 (ns/id 재사용 + 남는 id DELETE) ===
+    visualization_msgs::msg::MarkerArray cone_markers;
+    int cone_count = 0;
+    for (const auto& c : confirmed) {
+      visualization_msgs::msg::Marker m;
+      m.header = cloud_map.header;
+      m.ns = "all_cones";     // 고정 ns
+      m.id = cone_count++;    // 0..N-1 재사용
+      m.type = visualization_msgs::msg::Marker::CYLINDER;
+      m.action = visualization_msgs::msg::Marker::ADD;
+      m.pose.position.x = c.x();
+      m.pose.position.y = c.y();
+      m.pose.position.z = c.z();
+      m.scale.x = 0.3;   // 지름
+      m.scale.y = 0.3;
+      m.scale.z = 0.6;   // 높이
+      m.color.r = 0.0;
+      m.color.g = 0.0;
+      m.color.b = 1.0;   // 파란색
+      m.color.a = 0.8;
+      cone_markers.markers.push_back(m);
+    }
+    // 사라진 나머지 id 삭제
+    for (int i = cone_count; i < last_cone_count_; ++i) {
+      visualization_msgs::msg::Marker del;
+      del.header = msg->header;
+      del.ns = "all_cones";
+      del.id = i;
+      del.action = visualization_msgs::msg::Marker::DELETE;
+      cone_markers.markers.push_back(del);
+    }
+    last_cone_count_ = cone_count;
+
+    // === p1/p2/arrow 고정 ns/id로 덮어쓰기 ===
+    // 차량 원점(0,0,0) 기준 1번(가장 가까운) 찾기
+    auto dist2d = [](const Eigen::Vector3f& p){ return std::hypot(p.x(), p.y()); };
+    int first_idx = -1;
+    float best = 1e9f;
+    for (int i = 0; i < static_cast<int>(confirmed.size()); ++i) {
+      float d = dist2d(confirmed[i]);
+      if (d < best) { best = d; first_idx = i; }
+    }
+
+    visualization_msgs::msg::MarkerArray p12_arr;
+    if (first_idx >= 0) {
+      const Eigen::Vector3f p1 = confirmed[first_idx];
+      int second_idx = -1;
+      best = 1e9f;
+      const float MAX_P12_DIST = 1.5f;
+
+      for (int i = 0; i < static_cast<int>(confirmed.size()); ++i) {
+        if (i == first_idx) continue;
+        float d_vehicle = std::hypot(confirmed[i].x(), confirmed[i].y());
+        float d12_xy = std::hypot(confirmed[i].x() - p1.x(),
+                                  confirmed[i].y() - p1.y());
+        if (d12_xy <= MAX_P12_DIST && d_vehicle < best) {
+          best = d_vehicle;
+          second_idx = i;
+        }
+      }
+
+      // p1 marker
+      {
+        visualization_msgs::msg::Marker m;
+        m.header = cloud_map.header; m.ns = "p12"; m.id = 0;
+        m.type = visualization_msgs::msg::Marker::SPHERE;
+        m.action = visualization_msgs::msg::Marker::ADD;
+        m.pose.position.x = p1.x(); 
+        m.pose.position.y = p1.y(); 
+        m.pose.position.z = p1.z();
+        m.scale.x = m.scale.y = m.scale.z = 0.4;
+        m.color.r = 1.0; m.color.g = 0.0; m.color.b = 0.0; m.color.a = 1.0;
+        p12_arr.markers.push_back(m);
+      }
+
+      if (second_idx >= 0) {
+        const Eigen::Vector3f p2 = confirmed[second_idx];
+
+        // p2 marker
+        {
+          visualization_msgs::msg::Marker m;
+          m.header = cloud_map.header; m.ns = "p12"; m.id = 1;
+          m.type = visualization_msgs::msg::Marker::SPHERE; m.action = visualization_msgs::msg::Marker::ADD;
+          m.pose.position.x = p2.x(); m.pose.position.y = p2.y(); m.pose.position.z = p2.z();
+          m.scale.x = m.scale.y = m.scale.z = 0.4;
+          m.color.r = 1.0; m.color.g = 0.0; m.color.b = 0.0; m.color.a = 1.0;
+          p12_arr.markers.push_back(m);
+        }
+
+        // arrow 1->2
+        {
+          visualization_msgs::msg::Marker m;
+          m.header = cloud_map.header; m.ns = "p12"; m.id = 2;
+          m.type = visualization_msgs::msg::Marker::ARROW; m.action = visualization_msgs::msg::Marker::ADD;
+          geometry_msgs::msg::Point A,B; A.x=p1.x(); A.y=p1.y(); A.z=p1.z();
+          B.x=p2.x(); B.y=p2.y(); B.z=p2.z();
+          m.points = {A,B};
+          m.scale.x = 0.10; m.scale.y = 0.20; m.scale.z = 0.20;
+          m.color.r = 1.0f; m.color.g = 0.0f; m.color.b = 0.0f; m.color.a = 1.0f;
+          p12_arr.markers.push_back(m);
+        }
+
+        // --- 로컬 좌표계 정의 & TF (매 콜백) ---
+        Eigen::Vector3f x_axis = (p2 - p1);
+        float len = x_axis.norm();
+        if (len >= 1e-6f) {
+          x_axis /= len;
+          const Eigen::Vector3f z_global(0.f, 0.f, 1.f);
+          Eigen::Vector3f y_axis = x_axis.cross(z_global);
+          if (y_axis.norm() < 1e-6f) y_axis = Eigen::Vector3f(0.f, 1.f, 0.f);
+          else y_axis.normalize();
+          Eigen::Vector3f z_axis = x_axis.cross(y_axis);
+          z_axis.normalize();
+
+          Eigen::Matrix3f R; R.col(0)=x_axis; R.col(1)=y_axis; R.col(2)=z_axis;
+          Eigen::Quaternionf q(R); q.normalize();
+
+          geometry_msgs::msg::TransformStamped T;
+          T.header = cloud_map.header;                 // 이 시각의 TF로 브로드캐스트
+          T.child_frame_id = "cone_local";
+          T.transform.translation.x = p1.x();
+          T.transform.translation.y = p1.y();
+          T.transform.translation.z = p1.z();
+          T.transform.rotation.x = q.x();
+          T.transform.rotation.y = q.y();
+          T.transform.rotation.z = q.z();
+          T.transform.rotation.w = q.w();
+
+          // ✅ 매 콜백마다 TF 전송 (동적 프레임)
+          tf_broadcaster_->sendTransform(T);
+
+          if (!has_initialized_frame_) {
+            origin_ = p1;
+            R_ = R;
+            has_initialized_frame_ = true;
+            RCLCPP_INFO(this->get_logger(), "✅ Local frame initialized (cone_local)");
+          }
+        } else {
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                               "p1 and p2 are too close; skip TF.");
+        }
+      } else {
+        // 두 번째 점이 없으면 화살표/두 번째 구 마커는 다음 퍼블리시에서 덮어쓰기 되도록 DELETE
+        for (int id = 1; id <= 2; ++id) {
+          visualization_msgs::msg::Marker del;
+          del.header = msg->header; del.ns="p12"; del.id=id; del.action=visualization_msgs::msg::Marker::DELETE;
+          p12_arr.markers.push_back(del);
+        }
+      }
+    } else {
+      // p1/p2/arrow 모두 삭제
+      for (int id = 0; id <= 2; ++id) {
+        visualization_msgs::msg::Marker del;
+        del.header = msg->header; del.ns="p12"; del.id=id; del.action=visualization_msgs::msg::Marker::DELETE;
+        p12_arr.markers.push_back(del);
+      }
+    }
+
+    // --- 이후부터는 cone_local 기준 변환 (초기화된 경우에만) ---
+    std::vector<Eigen::Vector3f> local_cones;
+    local_cones.reserve(confirmed.size());
+    if (has_initialized_frame_) {
+      for (const auto& c : confirmed) {
+        Eigen::Vector3f local = R_.transpose() * (c - origin_);
+        local_cones.push_back(local);
+      }
+    }
+
+    // --- 그룹화 (X좌표 기준) ---
+    std::vector<std::vector<Eigen::Vector3f>> groups_x;
+    if (!local_cones.empty()) {
+      std::vector<Eigen::Vector3f> sorted = local_cones;
+      std::sort(sorted.begin(), sorted.end(),
+                [](const auto& a, const auto& b){ return a.y() < b.y(); });
+
+      std::vector<Eigen::Vector3f> current_group;
+      for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto& p = sorted[i];
+        if (current_group.empty()) {
+          current_group.push_back(p);
+          continue;
+        }
+        // 그룹 내에서 y가 가장 비슷한 점 q 선택
+        int j = argmin_abs_y(current_group, p);
+        const auto& q = current_group[j];
+
+        if (can_join_X(p, q)) {
+          current_group.push_back(p);
+        } else {
+          groups_x.push_back(current_group);
+          current_group.clear();
+          current_group.push_back(p);
+        }
+      }
+      if (!current_group.empty()) groups_x.push_back(current_group);
+    }
+
+
+    // --- 그룹화 (Y좌표 기준) ---
+    std::vector<std::vector<Eigen::Vector3f>> groups_y;
+    if (!local_cones.empty()) {
+      std::vector<Eigen::Vector3f> sorted = local_cones;
+      std::sort(sorted.begin(), sorted.end(),
+                [](const auto& a, const auto& b){ return a.x() < b.x(); });
+
+      std::vector<Eigen::Vector3f> current_group;
+      for (size_t i = 0; i < sorted.size(); ++i) {
+        const auto& p = sorted[i];
+        if (current_group.empty()) {
+          current_group.push_back(p);
+          continue;
+        }
+        // 그룹 내에서 x가 가장 비슷한 점 q 선택
+        int j = argmin_abs_x(current_group, p);
+        const auto& q = current_group[j];
+
+        if (can_join_Y(p, q)) {
+          current_group.push_back(p);
+        } else {
+          groups_y.push_back(current_group);
+          current_group.clear();
+          current_group.push_back(p);
+        }
+      }
+      if (!current_group.empty()) groups_y.push_back(current_group);
+    }
+
+    // 1차 그룹화 완료 후, 2차 병합 수행 (로그/시각화보다 위)
+    if (!groups_y.empty()) {
+      groups_y = second_pass_merge_Y(groups_y);
+    }
+    if (!groups_x.empty()) {
+      groups_x = second_pass_merge_X(groups_x);
+    }
+
+    // --- 그룹화 결과 로그 ---
+    RCLCPP_INFO(this->get_logger(), "📌 그룹화 결과 (cone_local 좌표계 기준)");
+    RCLCPP_INFO(this->get_logger(), "X축 기준 그룹 수: %zu", groups_x.size());
+    for (size_t g = 0; g < groups_x.size(); ++g) {
+      std::ostringstream oss; oss << "  Group X" << g << ": ";
+      for (const auto& p : groups_x[g]) {
+        oss << "(" << std::fixed << std::setprecision(2)
+            << p.x() << "," << p.y() << "," << p.z() << ") ";
+      }
+      RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
+    }
+    RCLCPP_INFO(this->get_logger(), "Y축 기준 그룹 수: %zu", groups_y.size());
+    for (size_t g = 0; g < groups_y.size(); ++g) {
+      std::ostringstream oss; oss << "  Group Y" << g << ": ";
+      for (const auto& p : groups_y[g]) {
+        oss << "(" << std::fixed << std::setprecision(2)
+            << p.x() << "," << p.y() << "," << p.z() << ") ";
+      }
+      RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
+    }
+
+    // --- 그룹 선 시각화 (ns/id 재사용 + 줄어든 id DELETE) ---
+    visualization_msgs::msg::MarkerArray group_markers;
+    
+    // 보조: LINE_LIST에 폴리라인을 (p[i-1], p[i]) 쌍으로 추가
+    auto append_polyline_as_line_list = [&](visualization_msgs::msg::Marker& m,
+                                            const std::vector<Eigen::Vector3f>& poly) {
+      if (poly.size() < 2) return;
+      for (size_t i = 1; i < poly.size(); ++i) {
+        Eigen::Vector3f g0 = origin_ + R_ * poly[i - 1];
+        Eigen::Vector3f g1 = origin_ + R_ * poly[i];
+
+        geometry_msgs::msg::Point P0; P0.x = g0.x(); P0.y = g0.y(); P0.z = g0.z();
+        geometry_msgs::msg::Point P1; P1.x = g1.x(); P1.y = g1.y(); P1.z = g1.z();
+
+        m.points.push_back(P0);
+        m.points.push_back(P1);
+      }
+    };
+
+    // ---------------------- X: 마커 1개 ----------------------
+    {
+      visualization_msgs::msg::Marker mx;
+      mx.header = cloud_map.header;
+      mx.ns = "group_x";
+      mx.id = 0;  // X는 항상 id=0
+      mx.type = visualization_msgs::msg::Marker::LINE_LIST;
+      mx.scale.x = 0.05;
+      mx.color.r = 1.0f; mx.color.g = 0.5f; mx.color.b = 0.0f; mx.color.a = 0.95f;
+
+      // 모든 X-그룹을 하나의 LINE_LIST에 누적
+      for (const auto& poly : groups_x) {
+        append_polyline_as_line_list(mx, poly);
+      }
+
+      if (!mx.points.empty()) {
+        mx.action = visualization_msgs::msg::Marker::ADD;
+        group_markers.markers.push_back(mx);
+      } else {
+        // 이번 프레임에 표시할 X 선이 없으면 기존 것을 지움
+        mx.action = visualization_msgs::msg::Marker::DELETE;
+        group_markers.markers.push_back(mx);
+      }
+    }
+
+    // ---------------------- Y: 마커 1개 ----------------------
+    {
+      visualization_msgs::msg::Marker my;
+      my.header = cloud_map.header;
+      my.ns = "group_y";
+      my.id = 0;  // Y도 항상 id=0
+      my.type = visualization_msgs::msg::Marker::LINE_LIST; // LINE_STRIP 대신 LINE_LIST로 병합
+      my.scale.x = 0.05;
+      my.color.r = 0.0f; my.color.g = 0.7f; my.color.b = 1.0f; my.color.a = 0.95f;
+
+      for (const auto& poly : groups_y) {
+        append_polyline_as_line_list(my, poly);
+      }
+
+      if (!my.points.empty()) {
+        my.action = visualization_msgs::msg::Marker::ADD;
+        group_markers.markers.push_back(my);
+      } else {
+        my.action = visualization_msgs::msg::Marker::DELETE;
+        group_markers.markers.push_back(my);
+      }
+    }
+
+    // === rect_fitter 입력용: 그룹별 POINTS 마커 퍼블리시 ===
+    // groups_x, groups_y 는 cone_local 좌표 기준이라 글로벌로 환원해서 찍어줍니다.
+    visualization_msgs::msg::MarkerArray group_points_arr;
+    {
+      int id = 0;
+      auto emit_group_points = [&](const std::vector<std::vector<Eigen::Vector3f>>& groups,
+                                  const std::string& ns, float r,float g,float b){
+        for (const auto& grp : groups) {
+          if (grp.size() < 2) continue; // 점 2개 미만은 스킵(사각형 핏팅에 불리)
+          visualization_msgs::msg::Marker m;
+          m.header = cloud_map.header;     // 프레임/타임스탬프 동일
+          m.ns = ns;                  // "groupY_pts" / "groupX_pts"
+          m.id = id++;                // 그룹마다 고유 id
+          m.type = visualization_msgs::msg::Marker::POINTS;
+          m.action = visualization_msgs::msg::Marker::ADD;
+          m.scale.x = 0.06; m.scale.y = 0.06; // 점 크기
+          m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 0.95f;
+
+          // cone_local -> 글로벌로 환원
+          for (const auto& lp : grp) {
+            Eigen::Vector3f gp = origin_ + R_ * lp;
+            geometry_msgs::msg::Point P; P.x = gp.x(); P.y = gp.y(); P.z = gp.z();
+            m.points.push_back(P);
+          }
+          group_points_arr.markers.push_back(m);
+        }
+      };
+
+      emit_group_points(groups_y, "groupY_pts", 0.1f, 0.8f, 1.0f); // 하늘색
+      emit_group_points(groups_x, "groupX_pts", 1.0f, 0.6f, 0.1f); // 주황색
+    }
+
+    // ⚠️ 사각형 핏터 입력 전용 토픽
+    pub_group_points_->publish(group_points_arr);
+
+    // --- 마지막 병합/퍼블리시 (한 번만) ---
+    visualization_msgs::msg::MarkerArray merged;
+    merged.markers.insert(merged.markers.end(),
+                          cone_markers.markers.begin(), cone_markers.markers.end());
+    merged.markers.insert(merged.markers.end(),
+                          p12_arr.markers.begin(), p12_arr.markers.end());
+    merged.markers.insert(merged.markers.end(),
+                          group_markers.markers.begin(), group_markers.markers.end());
+
+    pub_marker_->publish(merged);
+  } // cloudCallback
+
+
+private:
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_cloud_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_marker_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_group_points_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_cluster_cloud_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_deg_zcloud_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_test_tf_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_accum_centroids_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_stable_centroids_;
+
+};
+
+int main(int argc, char** argv) {
+  rclcpp::init(argc, argv);
+  rclcpp::spin(std::make_shared<ConeFindNode>());
+  rclcpp::shutdown();
+  return 0;
+}

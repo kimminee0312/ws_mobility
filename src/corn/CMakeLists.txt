@@ -25,32 +25,44 @@ find_package(PCL 1.13 REQUIRED
 include_directories(${PCL_INCLUDE_DIRS})
 link_directories(/usr/local/lib ${PCL_LIBRARY_DIRS})
 
+# ===============================================================================================
+# Node 1  : parking_node
 add_executable(parking_node src/parking_node.cpp)
 ament_target_dependencies(parking_node
   rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
 )
 target_link_libraries(parking_node ${PCL_LIBRARIES})
 
+# Node 2 : parking_pre_node
 add_executable(parking_pre_node src/parking_pre_node.cpp)
 ament_target_dependencies(parking_pre_node
+  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
+)
+target_link_libraries(parking_pre_node ${PCL_LIBRARIES})
+
+# Node 3 : parking_final_node
+add_executable(parking_final_node src/parking_final_node.cpp)
+ament_target_dependencies(parking_final_node
+  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
+)
+target_link_libraries(parking_final_node ${PCL_LIBRARIES})
+
+# Node 4 : cone_find_node
+add_executable(cone_find_node src/cone_find_node.cpp)
+ament_target_dependencies(cone_find_node
   rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs nav_msgs tf2_sensor_msgs
   tf2
   tf2_ros
   tf2_sensor_msgs
   tf2_eigen
 )
-target_link_libraries(parking_pre_node ${PCL_LIBRARIES})
-
-add_executable(rect_fitter_node src/rect_fitter_node.cpp)
-ament_target_dependencies(rect_fitter_node
-  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
-)
-target_link_libraries(rect_fitter_node ${OpenCV_LIBS})
+target_link_libraries(cone_find_node ${OpenCV_LIBS})
 
 install(TARGETS
   parking_node
   parking_pre_node
-  rect_fitter_node
+  parking_final_node
+  cone_find_node
   DESTINATION lib/${PROJECT_NAME})
 ament_package()
 
