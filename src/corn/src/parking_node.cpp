@@ -26,6 +26,8 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <cstdio>   // for std::snprintf
+#include <cstring>  // safety include for snprintf environments
 
 using PointT = pcl::PointXYZ;
 
@@ -74,6 +76,8 @@ public:
 
     pub_entrance_pose_ = create_publisher<geometry_msgs::msg::PoseArray>(
       "/cone_parking_entrance", 10);
+    
+    pub_goal_  = create_publisher<geometry_msgs::msg::PoseStamped>("/parking_goal", 10); 
 
     RCLCPP_INFO(get_logger(), "✅ ParkingNode ready.");
   }
@@ -113,6 +117,8 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_stable_centroids_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr pub_all_markers_;
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr pub_entrance_pose_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_goal_; 
+
 
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
@@ -700,8 +706,7 @@ private:
       markers_out.markers.push_back(line);
     }
 
-    // ===== ENTRANCE DETECTION (updated spec) =====
-    // 1) local 좌표계로 first 기준 projection (x_along, y_side 기록)
+    // ===== ENTRANCE DETECTION + PARKING GOAL =====
     struct LocalPoint {
       int idx_global;
       float x_along;
@@ -711,30 +716,28 @@ private:
     std::vector<LocalPoint> local_pts;
     local_pts.reserve(selected.size());
 
+    // first_idx 기준 로컬 좌표 (R_local, p0_bl) 사용
     for (int idx : selected) {
-      Eigen::Vector3f p_bl = confirmed_bl[idx];
-      Eigen::Vector3f rel_bl = p_bl - p0_bl; // first point origin
-      Eigen::Vector3f p_loc = R_local.transpose() * rel_bl;
+      Eigen::Vector3f p_bl   = confirmed_bl[idx];
+      Eigen::Vector3f rel_bl = p_bl - p0_bl;          // first point 기준
+      Eigen::Vector3f p_loc  = R_local.transpose() * rel_bl;
 
       LocalPoint lp;
       lp.idx_global = idx;
       lp.x_along    = p_loc.x();
       lp.y_side     = p_loc.y();
-      lp.p_map      = confirmed[idx]; // map frame for viz
+      lp.p_map      = confirmed[idx];                 // map frame
       local_pts.push_back(lp);
     }
 
-    // 이미 selected 순서는 forward 순서(그리디)라 가정,
-    // 만약 혹시 몰라서 x_along 기준으로 정렬 한번 해주자
+    // 전방 순서로 정렬
     std::sort(local_pts.begin(), local_pts.end(),
               [](const LocalPoint& A, const LocalPoint& B){
                 return A.x_along < B.x_along;
               });
 
-    // 2) 인접 쌍만 본다: (i, i+1)
-    //    gap_x = |x_along[j] - x_along[i]| 사용
-    //    그 gap_x가 가장 큰 쌍 선택
-    const float ENTRANCE_MIN_GAP = 5.0f; // 5m 이상만 인정
+    // 인접 쌍 중 gap_x 최대
+    const float ENTRANCE_MIN_GAP = 5.0f; // 5m 이상
     float best_gap_x = -1.0f;
     int best_i = -1;
     int best_j = -1;
@@ -747,13 +750,12 @@ private:
         best_j = (int)(k+1);
       }
     }
-
+    // 인접 쌍 중 gap_x 최대 ...
     if (best_i != -1 && best_j != -1 && best_gap_x >= ENTRANCE_MIN_GAP) {
-      // entrance pair 결정
       Eigen::Vector3f pA = local_pts[best_i].p_map;
       Eigen::Vector3f pB = local_pts[best_j].p_map;
 
-      // 빨간 CYLINDER 두 개 찍기
+      // --- entrance cones (빨간 실린더) ---
       visualization_msgs::msg::Marker cyl1;
       cyl1.header = map_header;
       cyl1.ns = "entrance_points";
@@ -779,36 +781,114 @@ private:
       cyl2.pose.position.z = pB.z();
       markers_out.markers.push_back(cyl2);
 
-      // PoseArray publish
+      // --- parking_goal 위치 ---
+      Eigen::Vector3f mid;
+      mid.x() = 0.5f * (pA.x() + pB.x());
+      mid.y() = 0.5f * (pA.y() + pB.y());
+      mid.z() = 0.5f * (pA.z() + pB.z());
+
+      Eigen::Vector3f goal_map;
+      goal_map.x() = mid.x();
+      goal_map.y() = mid.y() - 1.3f;   // 요구사항: avg_y - 2.5
+      goal_map.z() = mid.z();
+
+      // --- parking_goal 방향: 진행방향(차선 따라 전진하는 방향) ---
+      // 1) base_link -> map 회전 추출
+      Eigen::Isometry3d T_map_from_base =
+        tf2::transformToEigen(tf_map2base.transform).inverse();
+
+      // 2) x_axis (base_link 진행방향) 를 map frame으로 회전만 적용
+      Eigen::Vector3d x_axis_bl_dir(x_axis.x(), x_axis.y(), x_axis.z());
+      Eigen::Vector3d x_axis_map_dir =
+        T_map_from_base.rotation() * x_axis_bl_dir;
+
+      // 3) yaw in map
+      float yaw_goal = std::atan2(
+        (float)x_axis_map_dir.y(),
+        (float)x_axis_map_dir.x()
+      );
+
+      // yaw -> quaternion (roll=0,pitch=0)
+      geometry_msgs::msg::Quaternion q_goal;
+      {
+        double cy = std::cos(yaw_goal * 0.5);
+        double sy = std::sin(yaw_goal * 0.5);
+        double cr = 1.0;
+        double sr = 0.0;
+        double cp = 1.0;
+        double sp = 0.0;
+
+        q_goal.w = cy*cr*cp + sy*sr*sp;
+        q_goal.x = cy*sr*cp - sy*cr*sp;
+        q_goal.y = cy*cr*sp + sy*sr*cp;
+        q_goal.z = sy*cr*cp - cy*sr*sp;
+      }
+
+      // PoseArray (/cone_parking_entrance): A,B,goal
       geometry_msgs::msg::PoseArray pa_msg;
       pa_msg.header = map_header;
-      geometry_msgs::msg::Pose poseA, poseB;
+
+      geometry_msgs::msg::Pose poseA, poseB, poseGoal;
       poseA.position.x = pA.x();
       poseA.position.y = pA.y();
       poseA.position.z = pA.z();
       poseB.position.x = pB.x();
       poseB.position.y = pB.y();
       poseB.position.z = pB.z();
+
+      poseGoal.position.x = goal_map.x();
+      poseGoal.position.y = goal_map.y();
+      poseGoal.position.z = goal_map.z();
+      poseGoal.orientation = q_goal;
+
       pa_msg.poses.push_back(poseA);
       pa_msg.poses.push_back(poseB);
+      pa_msg.poses.push_back(poseGoal);
       pub_entrance_pose_->publish(pa_msg);
 
+      // === (B) /parking_goal 단일 PoseStamped publish ===
+      geometry_msgs::msg::PoseStamped goal_msg;
+      goal_msg.header = map_header;  // same frame_id="map", same stamp
+      goal_msg.pose   = poseGoal;    // 위치+orientation 복사
+      pub_goal_->publish(goal_msg);
+
+      // RViz marker: parking_goal 화살표 (초록)
+      visualization_msgs::msg::Marker goal_marker;
+      goal_marker.header = map_header;
+      goal_marker.ns = "parking_goal";
+      goal_marker.id = 3001;
+      goal_marker.type = visualization_msgs::msg::Marker::ARROW;
+      goal_marker.action = visualization_msgs::msg::Marker::ADD;
+      goal_marker.pose.position.x = goal_map.x();
+      goal_marker.pose.position.y = goal_map.y();
+      goal_marker.pose.position.z = goal_map.z();
+      goal_marker.pose.orientation = q_goal;
+      goal_marker.scale.x = 2.0;
+      goal_marker.scale.y = 0.4;
+      goal_marker.scale.z = 0.4;
+      goal_marker.color.r = 0.0;
+      goal_marker.color.g = 1.0;
+      goal_marker.color.b = 0.0;
+      goal_marker.color.a = 1.0;
+      markers_out.markers.push_back(goal_marker);
+
       RCLCPP_INFO(this->get_logger(),
-        "Entrance pair chosen by adjacent gap_x: gap_x=%.2f m (>=%.2f)\n"
-        " A=(%.2f, %.2f, %.2f)  x_along=%.2f y_side=%.2f\n"
-        " B=(%.2f, %.2f, %.2f)  x_along=%.2f y_side=%.2f",
+        "Entrance OK: gap_x=%.2f m (>=%.2f)\n"
+        " goal=(%.2f, %.2f, %.2f) yaw=%.2fdeg (forward dir)",
         best_gap_x, ENTRANCE_MIN_GAP,
-        pA.x(), pA.y(), pA.z(), local_pts[best_i].x_along, local_pts[best_i].y_side,
-        pB.x(), pB.y(), pB.z(), local_pts[best_j].x_along, local_pts[best_j].y_side);
+        goal_map.x(), goal_map.y(), goal_map.z(),
+        yaw_goal * 180.0 / M_PI
+      );
+
     } else {
       RCLCPP_WARN(this->get_logger(),
         "[entrance] none: best_gap_x=%.2f (need >= %.2f), pair=(%d,%d)",
         best_gap_x, ENTRANCE_MIN_GAP, best_i, best_j);
     }
 
-    // publish all markers at end
     pub_all_markers_->publish(markers_out);
-  }
+    
+  } // end cloudCallback
 
 }; // class ParkingNode
 
