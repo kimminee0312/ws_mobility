@@ -29,7 +29,10 @@ link_directories(/usr/local/lib ${PCL_LIBRARY_DIRS})
 # Node 1  : parking_node
 add_executable(parking_node src/parking_node.cpp)
 ament_target_dependencies(parking_node
-  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs
+  rclcpp sensor_msgs visualization_msgs pcl_conversions pcl_msgs geometry_msgs tf2_ros nav_msgs 
+  tf2_sensor_msgs
+  tf2
+  tf2_eigen 
 )
 target_link_libraries(parking_node ${PCL_LIBRARIES})
 

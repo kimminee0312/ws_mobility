@@ -115,14 +115,14 @@ private:
   // 1차 그룹핑(느슨하게)
   const float X_EPS_JOIN   = 0.2f;  // X기준: Δx 허용
   const float Y_EPS_JOIN   = 0.2f;  // Y기준: Δy 허용
-  const float D_EPS_JOIN_X = 1.0f;  // X기준: 전체 거리 상한
-  const float D_EPS_JOIN_Y = 1.0f;  // Y기준: 전체 거리 상한 
+  const float D_EPS_JOIN_X = 2.8f;  // X기준: 전체 거리 상한
+  const float D_EPS_JOIN_Y = 2.8f;  // Y기준: 전체 거리 상한 
 
   // 2차 병합(보수)
   const float MERGE_Y_BAND = 0.3f;  // Y모드: 평균 y 차 허용(같은 가로줄)
   const float MERGE_X_BAND = 0.3f;  // X모드: 평균 x 차 허용(같은 세로줄)
-  const float MERGE_GAP_Y  = 1.0f;  // Y모드 전체 거리 
-  const float MERGE_GAP_X  = 1.0f;  // X모드 전체 거리 
+  const float MERGE_GAP_Y  = 2.8f;  // Y모드 전체 거리 
+  const float MERGE_GAP_X  = 2.8f;  // X모드 전체 거리 
 
   // TF
   std::string target_frame_;
@@ -652,56 +652,112 @@ private:
     last_cone_count_ = cone_count;
 
     // === p1/p2/arrow 고정 ns/id로 덮어쓰기 ===
-    // 차량 원점(0,0,0) 기준 1번(가장 가까운) 찾기
-    auto dist2d = [](const Eigen::Vector3f& p){ return std::hypot(p.x(), p.y()); };
+    // 이제부터는 "base_link에서 얼마나 가까운가"로 p1, p2를 고른다.
+
+    // 1) map -> base_link TF 구하기
+    std::vector<Eigen::Vector3f> confirmed_bl;  // base_link 기준 좌표들
+    confirmed_bl.reserve(confirmed.size());
+
+    geometry_msgs::msg::TransformStamped tf_map_to_bl;
+    bool have_tf_map_to_bl = false;
+    try {
+      // target=base_link, source=map
+      tf_map_to_bl = buffer_.lookupTransform(
+          "base_link",   // target frame
+          "map",         // source frame
+          msg->header.stamp);
+      have_tf_map_to_bl = true;
+    } catch (const tf2::TransformException& ex) {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 2000,
+          "TF lookup failed map -> base_link: %s", ex.what());
+      have_tf_map_to_bl = false;
+    }
+
+    if (have_tf_map_to_bl) {
+      Eigen::Isometry3d T_bl_from_map = tf2::transformToEigen(tf_map_to_bl.transform);
+      for (const auto& c_map : confirmed) {
+        Eigen::Vector3d p_map(c_map.x(), c_map.y(), c_map.z());
+        Eigen::Vector3d p_bl = T_bl_from_map * p_map; // base_link 좌표
+        confirmed_bl.emplace_back(
+          static_cast<float>(p_bl.x()),
+          static_cast<float>(p_bl.y()),
+          static_cast<float>(p_bl.z())
+        );
+      }
+    } else {
+      // TF 못 구했으면 fallback: 그냥 map 좌표 그대로 사용(기존 방식)
+      confirmed_bl = confirmed;
+    }
+
+    // 2) base_link 좌표계에서 가장 가까운 콘(p1) 고르기
+    auto dist2d = [](const Eigen::Vector3f& p){
+      return std::hypot(p.x(), p.y()); // base_link에서의 평면 거리
+    };
+
     int first_idx = -1;
     float best = 1e9f;
-    for (int i = 0; i < static_cast<int>(confirmed.size()); ++i) {
-      float d = dist2d(confirmed[i]);
-      if (d < best) { best = d; first_idx = i; }
+    for (int i = 0; i < static_cast<int>(confirmed_bl.size()); ++i) {
+      float d = dist2d(confirmed_bl[i]);
+      if (d < best) {
+        best = d;
+        first_idx = i;
+      }
     }
 
     visualization_msgs::msg::MarkerArray p12_arr;
     if (first_idx >= 0) {
-      const Eigen::Vector3f p1 = confirmed[first_idx];
+      const Eigen::Vector3f p1_global = confirmed[first_idx];      // map 좌표 (마커/TF용)
+
+      // 3) 두 번째 콘(p2): p1과의 거리 제한(예: 1.5m) + 차량에도 가까운 애
       int second_idx = -1;
       best = 1e9f;
-      const float MAX_P12_DIST = 1.5f;
+      const float MAX_P12_DIST = 1.5f; // p1과의 거리 조건
 
-      for (int i = 0; i < static_cast<int>(confirmed.size()); ++i) {
+      for (int i = 0; i < static_cast<int>(confirmed_bl.size()); ++i) {
         if (i == first_idx) continue;
-        float d_vehicle = std::hypot(confirmed[i].x(), confirmed[i].y());
-        float d12_xy = std::hypot(confirmed[i].x() - p1.x(),
-                                  confirmed[i].y() - p1.y());
+
+        // 차량 기준 거리(우선순위)
+        float d_vehicle = dist2d(confirmed_bl[i]);
+
+        // p1과의 XY 거리(이건 실제 세계 좌표로 비교해야 하므로 global에서 비교)
+        float d12_xy = std::hypot(
+          confirmed[i].x() - p1_global.x(),
+          confirmed[i].y() - p1_global.y()
+        );
+
         if (d12_xy <= MAX_P12_DIST && d_vehicle < best) {
           best = d_vehicle;
           second_idx = i;
         }
       }
 
-      // p1 marker
+      // p1 marker (map 프레임 위치로 찍어야 함)
       {
         visualization_msgs::msg::Marker m;
         m.header = cloud_map.header; m.ns = "p12"; m.id = 0;
         m.type = visualization_msgs::msg::Marker::SPHERE;
         m.action = visualization_msgs::msg::Marker::ADD;
-        m.pose.position.x = p1.x(); 
-        m.pose.position.y = p1.y(); 
-        m.pose.position.z = p1.z();
+        m.pose.position.x = p1_global.x();
+        m.pose.position.y = p1_global.y();
+        m.pose.position.z = p1_global.z();
         m.scale.x = m.scale.y = m.scale.z = 0.4;
         m.color.r = 1.0; m.color.g = 0.0; m.color.b = 0.0; m.color.a = 1.0;
         p12_arr.markers.push_back(m);
       }
 
       if (second_idx >= 0) {
-        const Eigen::Vector3f p2 = confirmed[second_idx];
+        const Eigen::Vector3f p2_global = confirmed[second_idx];
 
         // p2 marker
         {
           visualization_msgs::msg::Marker m;
           m.header = cloud_map.header; m.ns = "p12"; m.id = 1;
-          m.type = visualization_msgs::msg::Marker::SPHERE; m.action = visualization_msgs::msg::Marker::ADD;
-          m.pose.position.x = p2.x(); m.pose.position.y = p2.y(); m.pose.position.z = p2.z();
+          m.type = visualization_msgs::msg::Marker::SPHERE;
+          m.action = visualization_msgs::msg::Marker::ADD;
+          m.pose.position.x = p2_global.x();
+          m.pose.position.y = p2_global.y();
+          m.pose.position.z = p2_global.z();
           m.scale.x = m.scale.y = m.scale.z = 0.4;
           m.color.r = 1.0; m.color.g = 0.0; m.color.b = 0.0; m.color.a = 1.0;
           p12_arr.markers.push_back(m);
@@ -711,46 +767,54 @@ private:
         {
           visualization_msgs::msg::Marker m;
           m.header = cloud_map.header; m.ns = "p12"; m.id = 2;
-          m.type = visualization_msgs::msg::Marker::ARROW; m.action = visualization_msgs::msg::Marker::ADD;
-          geometry_msgs::msg::Point A,B; A.x=p1.x(); A.y=p1.y(); A.z=p1.z();
-          B.x=p2.x(); B.y=p2.y(); B.z=p2.z();
+          m.type = visualization_msgs::msg::Marker::ARROW;
+          m.action = visualization_msgs::msg::Marker::ADD;
+          geometry_msgs::msg::Point A,B;
+          A.x = p1_global.x(); A.y = p1_global.y(); A.z = p1_global.z();
+          B.x = p2_global.x(); B.y = p2_global.y(); B.z = p2_global.z();
           m.points = {A,B};
           m.scale.x = 0.10; m.scale.y = 0.20; m.scale.z = 0.20;
           m.color.r = 1.0f; m.color.g = 0.0f; m.color.b = 0.0f; m.color.a = 1.0f;
           p12_arr.markers.push_back(m);
         }
 
-        // --- 로컬 좌표계 정의 & TF (매 콜백) ---
-        Eigen::Vector3f x_axis = (p2 - p1);
+        // cone_local 프레임 생성 (p1_global -> origin, x축 = p1->p2)
+        Eigen::Vector3f x_axis = (p2_global - p1_global);
         float len = x_axis.norm();
         if (len >= 1e-6f) {
           x_axis /= len;
           const Eigen::Vector3f z_global(0.f, 0.f, 1.f);
           Eigen::Vector3f y_axis = x_axis.cross(z_global);
-          if (y_axis.norm() < 1e-6f) y_axis = Eigen::Vector3f(0.f, 1.f, 0.f);
-          else y_axis.normalize();
+          if (y_axis.norm() < 1e-6f) {
+            y_axis = Eigen::Vector3f(0.f, 1.f, 0.f);
+          } else {
+            y_axis.normalize();
+          }
           Eigen::Vector3f z_axis = x_axis.cross(y_axis);
           z_axis.normalize();
 
-          Eigen::Matrix3f R; R.col(0)=x_axis; R.col(1)=y_axis; R.col(2)=z_axis;
-          Eigen::Quaternionf q(R); q.normalize();
+          Eigen::Matrix3f R; 
+          R.col(0)=x_axis; 
+          R.col(1)=y_axis; 
+          R.col(2)=z_axis;
+          Eigen::Quaternionf q(R); 
+          q.normalize();
 
           geometry_msgs::msg::TransformStamped T;
-          T.header = cloud_map.header;                 // 이 시각의 TF로 브로드캐스트
+          T.header = cloud_map.header;    // map 기준
           T.child_frame_id = "cone_local";
-          T.transform.translation.x = p1.x();
-          T.transform.translation.y = p1.y();
-          T.transform.translation.z = p1.z();
+          T.transform.translation.x = p1_global.x();
+          T.transform.translation.y = p1_global.y();
+          T.transform.translation.z = p1_global.z();
           T.transform.rotation.x = q.x();
           T.transform.rotation.y = q.y();
           T.transform.rotation.z = q.z();
           T.transform.rotation.w = q.w();
 
-          // ✅ 매 콜백마다 TF 전송 (동적 프레임)
           tf_broadcaster_->sendTransform(T);
 
           if (!has_initialized_frame_) {
-            origin_ = p1;
+            origin_ = p1_global;
             R_ = R;
             has_initialized_frame_ = true;
             RCLCPP_INFO(this->get_logger(), "✅ Local frame initialized (cone_local)");
@@ -759,19 +823,27 @@ private:
           RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
                                "p1 and p2 are too close; skip TF.");
         }
+
       } else {
-        // 두 번째 점이 없으면 화살표/두 번째 구 마커는 다음 퍼블리시에서 덮어쓰기 되도록 DELETE
+        // 두 번째 점이 없으면 화살표/두 번째 구 마커는 삭제하도록 퍼블리시
         for (int id = 1; id <= 2; ++id) {
           visualization_msgs::msg::Marker del;
-          del.header = msg->header; del.ns="p12"; del.id=id; del.action=visualization_msgs::msg::Marker::DELETE;
+          del.header = msg->header;
+          del.ns = "p12";
+          del.id = id;
+          del.action = visualization_msgs::msg::Marker::DELETE;
           p12_arr.markers.push_back(del);
         }
       }
+
     } else {
-      // p1/p2/arrow 모두 삭제
+      // p1조차 없으면 p12 전부 삭제
       for (int id = 0; id <= 2; ++id) {
         visualization_msgs::msg::Marker del;
-        del.header = msg->header; del.ns="p12"; del.id=id; del.action=visualization_msgs::msg::Marker::DELETE;
+        del.header = msg->header;
+        del.ns = "p12";
+        del.id = id;
+        del.action = visualization_msgs::msg::Marker::DELETE;
         p12_arr.markers.push_back(del);
       }
     }
@@ -800,7 +872,6 @@ private:
           current_group.push_back(p);
           continue;
         }
-        // 그룹 내에서 y가 가장 비슷한 점 q 선택
         int j = argmin_abs_y(current_group, p);
         const auto& q = current_group[j];
 
@@ -814,7 +885,6 @@ private:
       }
       if (!current_group.empty()) groups_x.push_back(current_group);
     }
-
 
     // --- 그룹화 (Y좌표 기준) ---
     std::vector<std::vector<Eigen::Vector3f>> groups_y;
@@ -830,7 +900,6 @@ private:
           current_group.push_back(p);
           continue;
         }
-        // 그룹 내에서 x가 가장 비슷한 점 q 선택
         int j = argmin_abs_x(current_group, p);
         const auto& q = current_group[j];
 
@@ -845,7 +914,7 @@ private:
       if (!current_group.empty()) groups_y.push_back(current_group);
     }
 
-    // 1차 그룹화 완료 후, 2차 병합 수행 (로그/시각화보다 위)
+    // 1차 그룹화 완료 후, 2차 병합 수행
     if (!groups_y.empty()) {
       groups_y = second_pass_merge_Y(groups_y);
     }
@@ -857,7 +926,8 @@ private:
     RCLCPP_INFO(this->get_logger(), "📌 그룹화 결과 (cone_local 좌표계 기준)");
     RCLCPP_INFO(this->get_logger(), "X축 기준 그룹 수: %zu", groups_x.size());
     for (size_t g = 0; g < groups_x.size(); ++g) {
-      std::ostringstream oss; oss << "  Group X" << g << ": ";
+      std::ostringstream oss; 
+      oss << "  Group X" << g << ": ";
       for (const auto& p : groups_x[g]) {
         oss << "(" << std::fixed << std::setprecision(2)
             << p.x() << "," << p.y() << "," << p.z() << ") ";
@@ -866,7 +936,8 @@ private:
     }
     RCLCPP_INFO(this->get_logger(), "Y축 기준 그룹 수: %zu", groups_y.size());
     for (size_t g = 0; g < groups_y.size(); ++g) {
-      std::ostringstream oss; oss << "  Group Y" << g << ": ";
+      std::ostringstream oss; 
+      oss << "  Group Y" << g << ": ";
       for (const auto& p : groups_y[g]) {
         oss << "(" << std::fixed << std::setprecision(2)
             << p.x() << "," << p.y() << "," << p.z() << ") ";
@@ -874,10 +945,9 @@ private:
       RCLCPP_INFO(this->get_logger(), "%s", oss.str().c_str());
     }
 
-    // --- 그룹 선 시각화 (ns/id 재사용 + 줄어든 id DELETE) ---
+    // --- 그룹 선 시각화 ---
     visualization_msgs::msg::MarkerArray group_markers;
     
-    // 보조: LINE_LIST에 폴리라인을 (p[i-1], p[i]) 쌍으로 추가
     auto append_polyline_as_line_list = [&](visualization_msgs::msg::Marker& m,
                                             const std::vector<Eigen::Vector3f>& poly) {
       if (poly.size() < 2) return;
@@ -885,25 +955,26 @@ private:
         Eigen::Vector3f g0 = origin_ + R_ * poly[i - 1];
         Eigen::Vector3f g1 = origin_ + R_ * poly[i];
 
-        geometry_msgs::msg::Point P0; P0.x = g0.x(); P0.y = g0.y(); P0.z = g0.z();
-        geometry_msgs::msg::Point P1; P1.x = g1.x(); P1.y = g1.y(); P1.z = g1.z();
+        geometry_msgs::msg::Point P0; 
+        P0.x = g0.x(); P0.y = g0.y(); P0.z = g0.z();
+        geometry_msgs::msg::Point P1; 
+        P1.x = g1.x(); P1.y = g1.y(); P1.z = g1.z();
 
         m.points.push_back(P0);
         m.points.push_back(P1);
       }
     };
 
-    // ---------------------- X: 마커 1개 ----------------------
+    // X 그룹 라인 (id=0만 씀)
     {
       visualization_msgs::msg::Marker mx;
       mx.header = cloud_map.header;
       mx.ns = "group_x";
-      mx.id = 0;  // X는 항상 id=0
+      mx.id = 0;
       mx.type = visualization_msgs::msg::Marker::LINE_LIST;
       mx.scale.x = 0.05;
       mx.color.r = 1.0f; mx.color.g = 0.5f; mx.color.b = 0.0f; mx.color.a = 0.95f;
 
-      // 모든 X-그룹을 하나의 LINE_LIST에 누적
       for (const auto& poly : groups_x) {
         append_polyline_as_line_list(mx, poly);
       }
@@ -912,19 +983,18 @@ private:
         mx.action = visualization_msgs::msg::Marker::ADD;
         group_markers.markers.push_back(mx);
       } else {
-        // 이번 프레임에 표시할 X 선이 없으면 기존 것을 지움
         mx.action = visualization_msgs::msg::Marker::DELETE;
         group_markers.markers.push_back(mx);
       }
     }
 
-    // ---------------------- Y: 마커 1개 ----------------------
+    // Y 그룹 라인 (id=0만 씀)
     {
       visualization_msgs::msg::Marker my;
       my.header = cloud_map.header;
       my.ns = "group_y";
-      my.id = 0;  // Y도 항상 id=0
-      my.type = visualization_msgs::msg::Marker::LINE_LIST; // LINE_STRIP 대신 LINE_LIST로 병합
+      my.id = 0;
+      my.type = visualization_msgs::msg::Marker::LINE_LIST;
       my.scale.x = 0.05;
       my.color.r = 0.0f; my.color.g = 0.7f; my.color.b = 1.0f; my.color.a = 0.95f;
 
@@ -942,27 +1012,27 @@ private:
     }
 
     // === rect_fitter 입력용: 그룹별 POINTS 마커 퍼블리시 ===
-    // groups_x, groups_y 는 cone_local 좌표 기준이라 글로벌로 환원해서 찍어줍니다.
     visualization_msgs::msg::MarkerArray group_points_arr;
     {
       int id = 0;
       auto emit_group_points = [&](const std::vector<std::vector<Eigen::Vector3f>>& groups,
                                   const std::string& ns, float r,float g,float b){
         for (const auto& grp : groups) {
-          if (grp.size() < 2) continue; // 점 2개 미만은 스킵(사각형 핏팅에 불리)
+          if (grp.size() < 2) continue;
           visualization_msgs::msg::Marker m;
-          m.header = cloud_map.header;     // 프레임/타임스탬프 동일
-          m.ns = ns;                  // "groupY_pts" / "groupX_pts"
-          m.id = id++;                // 그룹마다 고유 id
+          m.header = cloud_map.header;
+          m.ns = ns;
+          m.id = id++;
           m.type = visualization_msgs::msg::Marker::POINTS;
           m.action = visualization_msgs::msg::Marker::ADD;
-          m.scale.x = 0.06; m.scale.y = 0.06; // 점 크기
+          m.scale.x = 0.06; 
+          m.scale.y = 0.06;
           m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 0.95f;
 
-          // cone_local -> 글로벌로 환원
           for (const auto& lp : grp) {
             Eigen::Vector3f gp = origin_ + R_ * lp;
-            geometry_msgs::msg::Point P; P.x = gp.x(); P.y = gp.y(); P.z = gp.z();
+            geometry_msgs::msg::Point P; 
+            P.x = gp.x(); P.y = gp.y(); P.z = gp.z();
             m.points.push_back(P);
           }
           group_points_arr.markers.push_back(m);
@@ -976,7 +1046,7 @@ private:
     // ⚠️ 사각형 핏터 입력 전용 토픽
     pub_group_points_->publish(group_points_arr);
 
-    // --- 마지막 병합/퍼블리시 (한 번만) ---
+    // --- 마지막 병합/퍼블리시 ---
     visualization_msgs::msg::MarkerArray merged;
     merged.markers.insert(merged.markers.end(),
                           cone_markers.markers.begin(), cone_markers.markers.end());

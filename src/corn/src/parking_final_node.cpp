@@ -39,17 +39,17 @@ public:
     pub_goal_  = create_publisher<geometry_msgs::msg::PoseStamped>("/parking_goal", 10); 
 
     // params
-    extension_len_ = declare_parameter("extension_len", 1.0);
-    extension_len_ext5_ = declare_parameter("extension_len_ext5", 12.0); // ★ 5m 추가
+    extension_len_ = declare_parameter("extension_len", 0.3);
+    extension_len_ext5_ = declare_parameter("extension_len_ext5", 5.3); // ★ 5m 추가
     angle_bin_tol_deg_ = declare_parameter("angle_bin_tol_deg", 5.0);
-    min_side_len_ = declare_parameter("min_side_len", 0.8);
+    min_side_len_ = declare_parameter("min_side_len", 2.3);
     max_side_len_ = declare_parameter("max_side_len", 6.0);
     near_parallel_dot_thresh_ = std::cos((90.0 - angle_bin_tol_deg_) * M_PI/180.0);
     near_colinear_dot_thresh_ = std::cos((angle_bin_tol_deg_) * M_PI/180.0);
     support_tol_dist_ = declare_parameter("support_tol_dist", 0.15);
     min_support_pts_per_side_ = declare_parameter("min_support_pts_per_side", 1);
     edge_min_len_ = declare_parameter("edge_min_len", 1.2);
-    max_edge_len_strict_ = declare_parameter("max_edge_len_strict", 5.0); // ★ 기본 5 m
+    max_edge_len_strict_ = declare_parameter("max_edge_len_strict", 5.5); // ★ 기본 5 m
 
     // ParkingFinalNode 생성자 내부 파라미터 선언부 근처에 추가
     cluster_radius_ = declare_parameter("cluster_radius", 0.5);   // ★ 추가: 같은 위치로 간주할 반경(m)
@@ -258,6 +258,12 @@ private:
               continue;
             }
 
+            // 적어도 한변은 4 m 이상이어야 함
+            if (strict_rect) {
+              if (e0 < 4.0f && e1 < 4.0f && e2 < 4.0f && e3 < 4.0f) 
+              continue;
+            }
+
             if (e0 < edge_min_len_ || e1 < edge_min_len_ || e2 < edge_min_len_ || e3 < edge_min_len_) continue;
 
             auto approx_eq = [](float a, float b){ return std::fabs(a-b) <= 0.3f*std::max(1.0f,std::max(a,b)); };
@@ -414,7 +420,12 @@ private:
 
     // ---------- 사각형 찾기 ----------
     // A) 초록(기본 연장, 지지 필수)
-    auto green_rects = generateRects(linesX, linesY, /*require_support=*/true);
+    auto green_rects = generateRects(linesX, linesY,
+                                        /*require_support=*/true,
+                                        /*support_k=*/4,
+                                        /*strict_rect=*/true,  // <- 원래 false였지
+                                        /*require_pure_extension_one_edge=*/false,
+                                        /*require_support_for_non_pure_edges=*/false);
 
     // B) 빨강(5m 연장, 지지 완화: k-of-4, 여기선 k=0로 완전 허용도 가능)
     auto red_candidates = generateRects(linesX5, linesY5,
