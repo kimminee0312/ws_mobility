@@ -294,7 +294,7 @@ private:
       pcl::PassThrough<PointT> pass;
       pass.setInputCloud(cloud);
       pass.setFilterFieldName("z");
-      pass.setFilterLimits(-0.21f, std::numeric_limits<float>::max());
+      pass.setFilterLimits(-0.21f, 0.5f);
       pass.filter(*cloud_z);
     }
     if (cloud_z->empty()) return;
