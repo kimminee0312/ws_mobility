@@ -5,7 +5,12 @@
 > 대학생 창작 모빌리티 경진대회 · 인지 알고리즘 개발 (2025년)
 
 자율주행 차량의 자동 주차 기능을 위한 **3D LiDAR 기반 주차공간 인식** 알고리즘입니다.
-[Screencast from 2025-09-22 12-35-47.webm](https://github.com/user-attachments/assets/057c10ca-7627-4528-ab0f-09aca0717156)
+
+
+
+
+
+
 
 ---
 
